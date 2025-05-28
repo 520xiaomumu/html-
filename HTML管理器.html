@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HTML 文件管理器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* 自定义滚动条样式 */
+    .html-preview-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+    .html-preview-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+    .html-preview-scrollbar::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
+    .html-preview-scrollbar::-webkit-scrollbar-thumb:hover { background: #555; }
+    [draggable="true"] { user-select: none; }
+    .dragging { opacity: 0.4; }
+    .drop-target-active { background-color: #e0f2fe !important; ring: 2px solid #3b82f6 !important; }
+    .markdown-preview, .folder-content-preview { white-space: pre-wrap; font-family: monospace; background-color: #f7fafc; border: 1px solid #e2e8f0; border-radius: 0.375rem; padding: 1rem; overflow-x: auto; }
+    .overview-item-link { cursor: pointer; color: #2563eb; text-decoration: none; }
+    .overview-item-link:hover { text-decoration: underline; color: #1d4ed8; }
+    .search-result-path { font-size: 0.75rem; color: #64748b; margin-left: 0.5rem; }
+    /* 拖拽排序指示器样式 */
+    .drop-indicator-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 3px; /* 线条粗细 */
+        background-color: #3b82f6; /* 蓝色指示线 */
+        z-index: 10;
+        pointer-events: none; /* 确保不干扰拖放事件 */
+    }
+    .drop-indicator-line.top { top: -2px; } /* 放置在元素上方 */
+    .drop-indicator-line.bottom { bottom: -2px; } /* 放置在元素下方 */
+    #tree-ul-root li button { position: relative; } /* 父元素需要相对定位 */
+
+  </style>
+</head>
+<body class="bg-slate-100 font-sans">
+
+  <div id="app-container" class="min-h-screen p-4 sm:p-8 flex flex-col">
+    <header class="mb-6">
+      <h1 class="text-3xl sm:text-4xl font-bold text-slate-800">HTML 文件管理器</h1>
+      <p class="text-slate-600 mt-1">管理您的 HTML 文件。</p>
+    </header>
+
+    <div class="flex flex-col md:flex-row gap-6 flex-grow min-h-0">
+      <div class="w-full md:w-1/3 lg:w-1/4 flex flex-col space-y-4">
+        <div class="flex flex-wrap gap-2 mb-2"> 
+          <button id="btn-create-folder" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 px-3 py-1.5 text-xs space-x-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            <span>新建文件夹</span>
+          </button>
+          <button id="btn-upload-html" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-slate-200 text-slate-700 hover:bg-slate-300 focus:ring-slate-400 px-3 py-1.5 text-xs space-x-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" /></svg>
+            <span>上传 HTML</span>
+          </button>
+          <input type="file" id="file-upload-input" accept=".html,text/html" class="hidden" multiple> 
+          <button id="btn-download-selected" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-green-600 text-white hover:bg-green-700 focus:ring-green-500 px-3 py-1.5 text-xs space-x-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+            <span>下载选中项</span>
+          </button>
+        </div>
+        <nav id="breadcrumbs-nav" class="flex items-center space-x-2 text-sm text-slate-600 mb-4 p-3 bg-slate-200 rounded-md shadow">
+          </nav>
+        <div id="directory-tree-view" class="bg-white p-4 sm:p-6 rounded-lg shadow-lg flex-grow overflow-hidden flex flex-col">
+          <div class="mb-4">
+            <input type="search" id="search-input" placeholder="全局搜索文件/文件夹..." class="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+          </div>
+          <div class="flex justify-between items-center mb-4 pb-3 border-b">
+            <h2 id="file-browser-title" class="text-xl font-semibold text-slate-700">文件浏览器</h2>
+            <button id="btn-select-all" class="text-xs text-blue-600 hover:underline disabled:text-slate-400 disabled:no-underline" title="全选/取消全选当前列表项">全选</button>
+          </div>
+          <ul id="tree-ul-root" class="overflow-y-auto flex-grow" role="tree" aria-label="文件和文件夹树">
+            </ul>
+        </div>
+      </div>
+
+      <div id="item-details-panel" class="w-full md:w-2/3 lg:w-3/4 bg-white p-6 rounded-lg shadow-lg flex flex-col">
+        <div id="item-details-placeholder" class="text-center text-slate-500 flex-grow flex flex-col justify-center items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-20 h-20 text-slate-300 mb-4"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" /></svg>
+            <p class="text-lg">请从左侧选择一个文件或文件夹，</p>
+            <p class="text-lg">或在当前文件夹中创建一个新项目。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-backdrop" class="fixed inset-0 z-40 bg-black bg-opacity-50 backdrop-blur-sm p-4 hidden"></div>
+
+  <div id="input-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+      <div class="flex items-center justify-between p-4 border-b border-slate-200">
+        <h3 id="input-modal-title" class="text-xl font-semibold text-slate-700">模态框标题</h3>
+        <button id="input-modal-close-btn" class="text-slate-400 hover:text-slate-600 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <div class="p-6 overflow-auto">
+        <div class="space-y-4">
+          <label id="input-modal-label" for="input-modal-field" class="block text-sm font-medium text-slate-700">名称:</label>
+          <input type="text" id="input-modal-field" class="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+          <div class="flex justify-end space-x-2 pt-2">
+            <button id="input-modal-cancel-btn" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-slate-200 text-slate-700 hover:bg-slate-300 focus:ring-slate-400 px-4 py-2 text-sm">取消</button>
+            <button id="input-modal-confirm-btn" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 px-4 py-2 text-sm">确认</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="html-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-xl flex flex-col h-full sm:max-h-[90vh]">
+          <div class="flex items-center justify-between p-4 border-b border-slate-200">
+              <h3 id="html-modal-title" class="text-xl font-semibold text-slate-700 truncate">HTML 预览/编辑</h3>
+              <button id="html-modal-close-btn" class="text-slate-400 hover:text-slate-600 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+              </button>
+          </div>
+          <div class="p-6 flex-grow overflow-auto flex flex-col">
+              <iframe id="html-modal-preview-iframe" class="w-full h-full border-0 hidden min-h-[200px]"></iframe>
+              <textarea id="html-modal-edit-textarea" class="w-full h-full p-2 border rounded-md font-mono text-sm html-preview-scrollbar hidden flex-grow" placeholder="输入 HTML 内容..."></textarea>
+          </div>
+          <div class="flex justify-end space-x-2 p-4 mt-auto border-t border-slate-200">
+              <button id="html-modal-cancel-btn" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-slate-200 text-slate-700 hover:bg-slate-300 focus:ring-slate-400 px-4 py-2 text-sm">关闭</button>
+              <button id="html-modal-save-btn" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 px-4 py-2 text-sm hidden">保存更改</button>
+          </div>
+      </div>
+  </div>
+
+  <div id="move-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+      <div class="flex items-center justify-between p-4 border-b border-slate-200">
+        <h3 id="move-modal-title" class="text-xl font-semibold text-slate-700">移动项目</h3>
+        <button id="move-modal-close-btn" class="text-slate-400 hover:text-slate-600 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <div class="p-6 overflow-y-auto">
+        <p class="mb-4 text-sm text-slate-600">选择目标文件夹:</p>
+        <div id="move-target-folder-list" role="tree" aria-label="选择目标文件夹" class="max-h-60 overflow-y-auto">
+          </div>
+      </div>
+      <div class="flex justify-end space-x-2 p-4 border-t mt-auto">
+        <button id="move-modal-cancel-btn" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-slate-200 text-slate-700 hover:bg-slate-300 focus:ring-slate-400 px-4 py-2 text-sm">取消</button>
+        <button id="move-modal-confirm-btn" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 px-4 py-2 text-sm">移动</button>
+      </div>
+    </div>
+  </div>
+  
+  <div id="confirm-delete-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col">
+      <div class="flex items-center justify-between p-4 border-b border-slate-200">
+        <h3 id="confirm-delete-modal-title" class="text-xl font-semibold text-red-600">确认删除</h3>
+        <button id="confirm-delete-modal-close-btn" class="text-slate-400 hover:text-slate-600 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <div class="p-6">
+        <p id="confirm-delete-modal-message" class="text-slate-700 mb-6">您确定要删除这个项目吗？此操作无法撤销。</p>
+        <div class="flex justify-end space-x-3">
+          <button id="confirm-delete-modal-cancel-btn" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 bg-slate-200 text-slate-700 hover:bg-slate-300 focus:ring-slate-400 px-4 py-2 text-sm">取消</button>
+          <button id="confirm-delete-modal-confirm-btn" class="font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 px-4 py-2 text-sm">删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+<script>
+  // --- Application State and Logic ---
+  let items = [
+    { id: 'folder-game', name: '游戏', type: 'folder', parentId: null, order: 0 },
+    { id: 'folder-study', name: '学习', type: 'folder', parentId: null, order: 1 },
+    { 
+      id: 'file-intro', 
+      name: '介绍.html', 
+      type: 'file', 
+      parentId: null, 
+      content: `
+        <h1>欢迎来到 HTML 文件管理器!</h1>
+        <p>这是一个使用原生 JavaScript 构建的简单文件管理工具。</p>
+        <p>您可以用它来：</p>
+        <ul>
+          <li>创建文件夹</li>
+          <li>上传 HTML 文件</li>
+          <li>预览 HTML 文件</li>
+          <li>重命名文件和文件夹</li>
+          <li>移动文件和文件夹</li>
+          <li>删除文件和文件夹</li>
+          <li>在同一文件夹内拖拽排序</li>
+          <li>全局搜索</li>
+        </ul>
+        <p>祝您使用愉快！</p>
+      `, 
+      mimeType: 'text/html', 
+      order: 2 
+    },
+    { id: 'file-game-1', name: '贪吃蛇.html', type: 'file', parentId: 'folder-game', content: '<h1>贪吃蛇游戏占位符</h1>', mimeType: 'text/html', order: 0 },
+    { id: 'file-study-1', name: 'HTML笔记.html', type: 'file', parentId: 'folder-study', content: '<h1>HTML 学习笔记</h1>', mimeType: 'text/html', order: 0 },
+  ];
+
+  let currentFolderId = null;
+  let selectedItemId = null;
+  let draggedItemId = null; 
+  let currentDragTargetLi = null; 
+  let currentModalType = null;
+  let modalTargetItem = null; 
+  let selectedMoveTargetId = undefined; 
+  let searchTerm = ''; 
+  let showRootOverview = false; 
+  let itemsToBatchDownload = new Set(); 
+
+  // --- DOM Element Retrieval ---
+  const breadcrumbsNav = document.getElementById('breadcrumbs-nav');
+  const directoryTreeUl = document.getElementById('tree-ul-root');
+  const itemDetailsPanel = document.getElementById('item-details-panel');
+  const itemDetailsPlaceholder = document.getElementById('item-details-placeholder');
+  const fileBrowserTitle = document.getElementById('file-browser-title');
+  const btnSelectAll = document.getElementById('btn-select-all');
+  
+  const btnCreateFolder = document.getElementById('btn-create-folder');
+  const btnUploadHtml = document.getElementById('btn-upload-html');
+  const fileUploadInput = document.getElementById('file-upload-input');
+  const searchInput = document.getElementById('search-input'); 
+  const btnDownloadSelected = document.getElementById('btn-download-selected');
+
+
+  // Modal elements
+  const modalBackdrop = document.getElementById('modal-backdrop');
+  const inputModal = document.getElementById('input-modal');
+  const inputModalTitle = document.getElementById('input-modal-title');
+  const inputModalLabel = document.getElementById('input-modal-label');
+  const inputModalField = document.getElementById('input-modal-field');
+  const inputModalCloseBtn = document.getElementById('input-modal-close-btn');
+  const inputModalCancelBtn = document.getElementById('input-modal-cancel-btn');
+  const inputModalConfirmBtn = document.getElementById('input-modal-confirm-btn');
+  const htmlModal = document.getElementById('html-modal');
+  const htmlModalTitle = document.getElementById('html-modal-title');
+  const htmlModalCloseBtn = document.getElementById('html-modal-close-btn');
+  const htmlModalPreviewIframe = document.getElementById('html-modal-preview-iframe');
+  const htmlModalEditTextarea = document.getElementById('html-modal-edit-textarea');
+  const htmlModalCancelBtn = document.getElementById('html-modal-cancel-btn');
+  const htmlModalSaveBtn = document.getElementById('html-modal-save-btn');
+  const moveModal = document.getElementById('move-modal');
+  const moveModalTitle = document.getElementById('move-modal-title');
+  const moveModalCloseBtn = document.getElementById('move-modal-close-btn');
+  const moveTargetFolderListDiv = document.getElementById('move-target-folder-list');
+  const moveModalCancelBtn = document.getElementById('move-modal-cancel-btn');
+  const moveModalConfirmBtn = document.getElementById('move-modal-confirm-btn');
+
+  const confirmDeleteModal = document.getElementById('confirm-delete-modal');
+  const confirmDeleteModalTitle = document.getElementById('confirm-delete-modal-title');
+  const confirmDeleteModalMessage = document.getElementById('confirm-delete-modal-message');
+  const confirmDeleteModalCloseBtn = document.getElementById('confirm-delete-modal-close-btn');
+  const confirmDeleteModalCancelBtn = document.getElementById('confirm-delete-modal-cancel-btn');
+  const confirmDeleteModalConfirmBtn = document.getElementById('confirm-delete-modal-confirm-btn');
+
+
+  // --- SVG Icon Definitions ---
+  const ICONS = {
+    folder: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-blue-500 group-hover:text-blue-600 flex-shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" /></svg>',
+    file: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-green-500 group-hover:text-green-600 flex-shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" /></svg>',
+    home: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h7.5" /></svg>',
+    chevronRight: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-slate-400"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>',
+    edit: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>',
+    trash: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.56 0c-.275.045-.55.083-.825.11M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>',
+    eye: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>',
+    move: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h18M16.5 3l4.5 4.5m0 0L16.5 12M21 7.5H3" /></svg>',
+    download: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>'
+  };
+
+  // --- Data Management Functions (Most are unchanged, key changes highlighted) ---
+  function generateId() { return crypto.randomUUID(); }
+  function getItem(itemId) { return items.find(item => item.id === itemId); }
+
+  function getChildren(folderId) { 
+    return items.filter(item => item.parentId === folderId)
+                .sort((a, b) => (a.order || 0) - (b.order || 0)); 
+  }
+  
+  function getGlobalSearchResults(term) {
+    if (!term) return [];
+    const lowerCaseTerm = term.toLowerCase();
+    return items.filter(item => item.name.toLowerCase().includes(lowerCaseTerm))
+                .sort((a,b) => { 
+                    if (a.type === 'folder' && b.type === 'file') return -1;
+                    if (a.type === 'file' && b.type === 'folder') return 1;
+                    return a.name.localeCompare(b.name); 
+                });
+  }
+
+  function getPath(folderId) {
+    const path = []; let currentId = folderId;
+    while (currentId) {
+      const folder = getItem(currentId);
+      if (folder && folder.type === 'folder') { path.unshift(folder); currentId = folder.parentId; } 
+      else { currentId = null; }
+    }
+    return path;
+  }
+  
+  function getItemPathString(itemId) {
+    const item = getItem(itemId);
+    if (!item) return "";
+    let pathStr = "";
+    let currentParentId = item.parentId;
+    while (currentParentId) {
+        const parentFolder = getItem(currentParentId);
+        if (parentFolder) {
+            pathStr = parentFolder.name + "/" + pathStr;
+            currentParentId = parentFolder.parentId;
+        } else {
+            break;
+        }
+    }
+    return "目录/" + pathStr; 
+}
+
+  function isDescendant(potentialChildId, potentialAncestorId) {
+    if (!potentialChildId || !potentialAncestorId) return false;
+    let currentItem = getItem(potentialChildId);
+    while (currentItem && currentItem.parentId) {
+        if (currentItem.parentId === potentialAncestorId) return true;
+        currentItem = getItem(currentItem.parentId);
+    }
+    return false;
+  }
+
+  function addItemToState(name, type, parentId, contentDetails = {}) {
+    const childrenOfParent = getChildren(parentId);
+    const newOrder = childrenOfParent.length > 0 ? Math.max(...childrenOfParent.map(i => i.order || 0)) + 1 : 0;
+    const newItem = { id: generateId(), name, type, parentId, order: newOrder, ...contentDetails };
+    items.push(newItem); 
+    reOrderItemsInFolder(parentId); 
+    renderApp(); 
+    return newItem;
+  }
+  
+  function updateItemContentInState(itemId, newContent) {
+    const item = getItem(itemId);
+    if (item && item.type === 'file') { item.content = newContent; renderApp(); }
+  }
+  
+  function reOrderItemsInFolder(folderId) {
+    const childrenInFolder = items.filter(item => item.parentId === folderId)
+                                 .sort((a, b) => (a.order || 0) - (b.order || 0));
+    childrenInFolder.forEach((child, index) => {
+        const originalItem = getItem(child.id); 
+        if (originalItem) {
+            originalItem.order = index;
+        }
+    });
+  }
+
+  function deleteItemFromState(itemId) {
+    const itemToDelete = getItem(itemId); if (!itemToDelete) return;
+    const oldParentId = itemToDelete.parentId;
+    let idsToDelete = [itemId];
+    if (itemToDelete.type === 'folder') {
+      function collectDescendantIds(currentFolderId) {
+          const directChildren = items.filter(i => i.parentId === currentFolderId);
+          directChildren.forEach(child => {
+              idsToDelete.push(child.id);
+              if (child.type === 'folder') collectDescendantIds(child.id);
+          });
+      }
+      collectDescendantIds(itemId);
+    }
+    items = items.filter(item => !idsToDelete.includes(item.id));
+    if (selectedItemId === itemId || idsToDelete.includes(selectedItemId)) selectedItemId = null;
+    itemsToBatchDownload.delete(itemId); 
+    
+    reOrderItemsInFolder(oldParentId); 
+
+    if (currentFolderId === itemId) { 
+        navigateToFolder(itemToDelete.parentId);
+    } else {
+        renderApp(); 
+    }
+  }
+
+  function renameItemInState(itemId, newName) {
+    const item = getItem(itemId); if (item) { item.name = newName; renderApp(); }
+  }
+
+  function moveItemInState(itemId, newParentId) {
+    const itemToMove = getItem(itemId); if (!itemToMove) return;
+    if (itemToMove.type === 'folder' && (itemId === newParentId || (newParentId && isDescendant(newParentId, itemId)))) {
+        console.warn("Cannot move folder into itself or its descendant."); return;
+    }
+    if (itemToMove.parentId === newParentId) return; 
+    
+    const oldParentId = itemToMove.parentId;
+    itemToMove.parentId = newParentId;
+
+    const newSiblings = getChildren(newParentId).filter(i => i.id !== itemId); 
+    itemToMove.order = newSiblings.length; 
+    
+    if (oldParentId !== null) reOrderItemsInFolder(oldParentId);
+    reOrderItemsInFolder(newParentId);
+    
+    renderApp();
+  }
+
+  // --- UI Rendering Functions ---
+  function renderBreadcrumbs() {
+    if (searchTerm) {
+        breadcrumbsNav.innerHTML = `<span class="text-sm text-slate-500">全局搜索结果: "${escapeHtml(searchTerm)}"</span>`;
+        return;
+    }
+    const path = getPath(currentFolderId); 
+    breadcrumbsNav.innerHTML = ''; 
+    const rootBtn = document.createElement('button');
+    rootBtn.className = 'flex items-center space-x-1 hover:text-blue-600 hover:underline transition-colors';
+    rootBtn.setAttribute('aria-label', '转到目录'); 
+    if (currentFolderId === null && path.length === 0) {
+        rootBtn.innerHTML = ICONS.home; 
+    } else {
+        rootBtn.innerHTML = `${ICONS.home} <span class="hidden sm:inline">目录</span>`; 
+    }
+    rootBtn.onclick = () => navigateToFolder(null); 
+    breadcrumbsNav.appendChild(rootBtn);
+    path.forEach(folder => {
+      const separator = document.createElement('span'); 
+      separator.innerHTML = ICONS.chevronRight;
+      breadcrumbsNav.appendChild(separator);
+      const folderBtn = document.createElement('button');
+      folderBtn.className = 'hover:text-blue-600 hover:underline transition-colors';
+      folderBtn.textContent = folder.name;
+      folderBtn.onclick = () => navigateToFolder(folder.id); 
+      breadcrumbsNav.appendChild(folderBtn);
+    });
+  }
+
+  function renderDirectoryTree() {
+    directoryTreeUl.innerHTML = ''; 
+    fileBrowserTitle.textContent = searchTerm ? '搜索结果' : '文件浏览器';
+    btnSelectAll.classList.toggle('hidden', !!searchTerm); 
+    btnSelectAll.textContent = areAllCurrentFilesSelected() ? '取消全选' : '全选';
+
+
+    const itemsToDisplay = searchTerm ? getGlobalSearchResults(searchTerm) : getChildren(currentFolderId);
+
+    if (!searchTerm) {
+        const rootDropArea = document.createElement('div');
+        rootDropArea.className = 'p-2 mb-1 rounded-md transition-colors';
+        rootDropArea.dataset.itemId = 'null'; 
+        rootDropArea.dataset.isRootArea = 'true'; 
+        rootDropArea.ondragover = handleDragOver; 
+        rootDropArea.ondragleave = handleDragLeave; 
+        rootDropArea.ondrop = handleDrop;
+        if (currentFolderId === null && itemsToDisplay.length === 0) {
+            rootDropArea.innerHTML = `<div class="text-center py-6 text-slate-400">目录为空。拖拽项目到此处，或创建新项目。</div>`; 
+        }
+        directoryTreeUl.appendChild(rootDropArea);
+        if (currentFolderId !== null) rootDropArea.innerHTML = ''; 
+    }
+
+
+    if (itemsToDisplay.length === 0) {
+        const emptyMessage = document.createElement('div');
+        emptyMessage.className = 'text-center py-10 text-slate-500';
+        if (searchTerm) {
+            emptyMessage.textContent = `未找到匹配 "${escapeHtml(searchTerm)}" 的项目。`;
+        } else if (currentFolderId !== null) { 
+            emptyMessage.textContent = `此文件夹为空。`;
+        } else if (currentFolderId === null && !searchTerm) {
+        }
+        if (emptyMessage.textContent && !(currentFolderId === null && !searchTerm && itemsToDisplay.length === 0)) {
+             directoryTreeUl.appendChild(emptyMessage); 
+        }
+        btnSelectAll.disabled = true; 
+        return;
+    }
+    btnSelectAll.disabled = itemsToDisplay.filter(i => i.type === 'file').length === 0; 
+
+    itemsToDisplay.forEach(item => {
+      const li = document.createElement('li'); 
+      li.className = `my-0.5 list-none flex items-center`; 
+      
+      if (item.type === 'file' && !searchTerm) {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'mr-2 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500';
+        checkbox.dataset.itemId = item.id;
+        checkbox.checked = itemsToBatchDownload.has(item.id);
+        checkbox.onchange = (e) => {
+            if (e.target.checked) {
+                itemsToBatchDownload.add(item.id);
+            } else {
+                itemsToBatchDownload.delete(item.id);
+            }
+            updateDownloadButtonState();
+            updateSelectAllButtonState();
+        };
+        li.appendChild(checkbox);
+      } else if (!searchTerm) { 
+        const placeholder = document.createElement('div');
+        placeholder.className = 'w-6 mr-2'; 
+        li.appendChild(placeholder);
+      }
+
+
+      const btn = document.createElement('button');
+      btn.className = `flex items-center space-x-2 p-1.5 rounded-md w-full text-left group transition-colors duration-150 ${selectedItemId === item.id ? 'bg-blue-50' : 'hover:bg-slate-100'}`;
+      btn.setAttribute('aria-label', `打开 ${item.name}, ${item.type}`);
+      btn.dataset.itemId = item.id; 
+      
+      if (!searchTerm) {
+          btn.draggable = true;
+          btn.ondragstart = (e) => handleDragStart(e, item.id);
+          btn.ondragend = handleDragEnd;
+          btn.ondragover = handleDragOver; 
+          btn.ondragleave = handleDragLeave; 
+          btn.ondrop = handleDrop; 
+      }
+
+      let pathDisplay = '';
+      if (searchTerm) { 
+          pathDisplay = `<span class="search-result-path truncate">(${getItemPathString(item.id)}${escapeHtml(item.name)})</span>`;
+      }
+
+      btn.innerHTML = `
+        ${item.type === 'folder' ? ICONS.folder : ICONS.file} 
+        <span class="truncate ${selectedItemId === item.id ? 'text-blue-600 font-medium' : 'text-slate-700 group-hover:text-slate-900'}">${escapeHtml(item.name)}</span>
+        ${pathDisplay}
+      `;
+      
+      btn.onclick = () => {
+          if (searchTerm && item.type === 'folder') {
+              navigateToFolder(item.id); 
+          } else {
+              selectItem(item.id); 
+          }
+      };
+      btn.ondblclick = () => { 
+          if (item.type === 'folder') {
+              navigateToFolder(item.id);
+          } else {
+              openHtmlModal('previewHtml', item);
+          }
+      };
+      li.appendChild(btn); 
+      directoryTreeUl.appendChild(li);
+    });
+    updateDownloadButtonState();
+    updateSelectAllButtonState();
+  }
+
+  function generateClickableOverviewHTML(itemsToDisplay, isRootOverview = false, depth = 0) {
+    let htmlString = "";
+    const sortedItems = [...itemsToDisplay].sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    sortedItems.forEach(item => {
+      const prefix = '  '.repeat(depth);
+      const linkClass = "overview-item-link";
+      const itemEscapedName = escapeHtml(item.name);
+      let itemLine = "";
+
+      if (item.type === 'folder') {
+        itemLine = `${prefix}- <a href="#" class="${linkClass}" data-item-id="${item.id}" data-item-type="folder">📁 <strong>${itemEscapedName}</strong></a>\n`;
+      } else {
+        itemLine = `${prefix}- <a href="#" class="${linkClass}" data-item-id="${item.id}" data-item-type="file">📄 ${itemEscapedName}</a>\n`;
+      }
+      htmlString += itemLine;
+      if (isRootOverview && item.type === 'folder') { 
+        const childrenOfThisFolder = items.filter(i => i.parentId === item.id); 
+        htmlString += generateClickableOverviewHTML(childrenOfThisFolder, true, depth + 1);
+      }
+    });
+    return htmlString;
+  }
+
+
+  function renderItemDetails() {
+    itemDetailsPanel.innerHTML = ''; 
+    if (showRootOverview && !searchTerm) { 
+        const overviewTitle = document.createElement('h2');
+        overviewTitle.className = 'text-2xl font-semibold text-slate-700 mb-4 pb-3 border-b';
+        overviewTitle.textContent = '文件系统概览';
+        itemDetailsPanel.appendChild(overviewTitle);
+        
+        const rootChildren = getChildren(null); 
+        const markdownHTML = generateClickableOverviewHTML(rootChildren, true, 0);
+        const preElement = document.createElement('pre');
+        preElement.className = 'markdown-preview flex-grow overflow-auto'; 
+        preElement.innerHTML = markdownHTML.trim() ? markdownHTML : "文件系统为空。";
+        itemDetailsPanel.appendChild(preElement);
+        return;
+    }
+
+    if (!selectedItemId) {
+      itemDetailsPanel.appendChild(itemDetailsPlaceholder.cloneNode(true)); return;
+    }
+    const item = getItem(selectedItemId);
+    if (!item) {
+      itemDetailsPanel.appendChild(itemDetailsPlaceholder.cloneNode(true)); return;
+    }
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'flex justify-between items-center mb-4 pb-3 border-b';
+    headerDiv.innerHTML = `
+      <h2 class="text-2xl font-semibold text-slate-700 truncate" title="${escapeHtml(item.name)}">
+        ${item.type === 'folder' ? ICONS.folder.replace('w-5 h-5', 'w-7 h-7') : ICONS.file.replace('w-5 h-5', 'w-7 h-7')}
+        ${escapeHtml(item.name)}
+      </h2>
+      <div class="flex space-x-2">
+        <button data-action="rename" title="重命名" class="item-action-btn p-1.5 rounded hover:bg-slate-100">${ICONS.edit}</button>
+        <button data-action="move" title="移动" class="item-action-btn p-1.5 rounded hover:bg-slate-100">${ICONS.move}</button>
+        ${item.type === 'file' ? `
+          <button data-action="preview" title="预览" class="item-action-btn p-1.5 rounded hover:bg-slate-100">${ICONS.eye}</button>
+          <button data-action="editHtml" title="编辑内容" class="item-action-btn p-1.5 rounded hover:bg-slate-100">${ICONS.edit}</button>
+          <button data-action="downloadFile" title="下载文件" class="item-action-btn p-1.5 rounded hover:bg-slate-100">${ICONS.download}</button> 
+        ` : ''}
+        <button data-action="delete" title="删除" class="item-action-btn p-1.5 rounded hover:bg-red-100 text-red-500">${ICONS.trash}</button>
+      </div>`;
+    itemDetailsPanel.appendChild(headerDiv);
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'flex-grow flex flex-col min-h-0';
+    if (item.type === 'folder') {
+      const summaryP = document.createElement('p');
+      summaryP.className = 'text-slate-600';
+      summaryP.textContent = `这是一个文件夹。包含 ${getChildren(item.id).length} 个项目。`;
+      contentDiv.appendChild(summaryP);
+      const openFolderBtn = document.createElement('button');
+      openFolderBtn.dataset.action = "openFolder";
+      openFolderBtn.className = "mt-4 mb-4 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 px-4 py-2 text-sm self-start";
+      openFolderBtn.textContent = "打开文件夹";
+      openFolderBtn.onclick = () => navigateToFolder(item.id); 
+      contentDiv.appendChild(openFolderBtn);
+      const contentPreviewTitle = document.createElement('h3');
+      contentPreviewTitle.className = 'text-lg font-semibold text-slate-700 mt-4 mb-2 pt-3 border-t';
+      contentPreviewTitle.textContent = '文件夹内容:';
+      contentDiv.appendChild(contentPreviewTitle);
+      const folderContentPre = document.createElement('pre');
+      folderContentPre.className = 'folder-content-preview flex-grow overflow-auto';
+      const folderChildren = getChildren(item.id); 
+      folderContentPre.innerHTML = generateClickableOverviewHTML(folderChildren, false, 0).trim() || "此文件夹为空。";
+      contentDiv.appendChild(folderContentPre);
+    } else { 
+      contentDiv.innerHTML = `
+        <p class="text-slate-600 mb-2">MIME 类型: ${escapeHtml(item.mimeType)}</p>
+        <p class="text-slate-600 mb-4">内容预览:</p>
+        <div class="border rounded-md p-4 bg-slate-50 flex-grow overflow-auto html-preview-scrollbar min-h-[200px]">
+          ${item.mimeType === 'text/html' ? 
+            `<iframe srcdoc="${escapeHtml(item.content)}" title="HTML Preview" class="w-full h-full border-0"></iframe>` :
+            `<pre class="text-sm whitespace-pre-wrap break-all">${escapeHtml(item.content)}</pre>`}
+        </div>`;
+    }
+    itemDetailsPanel.appendChild(contentDiv);
+    itemDetailsPanel.querySelectorAll('.item-action-btn').forEach(btn => {
+      btn.onclick = (e) => { handleItemAction(e.currentTarget.dataset.action, item); };
+    });
+  }
+  
+  function escapeHtml(unsafe) {
+    if (typeof unsafe !== 'string') return String(unsafe);
+    return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+
+  // --- Event Handling ---
+  function handleOverviewItemClick(event) {
+    const target = event.target.closest('.overview-item-link');
+    if (!target) return;
+    event.preventDefault(); 
+
+    const itemId = target.dataset.itemId;
+    const itemType = target.dataset.itemType;
+
+    if (!itemId) return;
+
+    if (itemType === 'folder') {
+        navigateToFolder(itemId);
+    } else if (itemType === 'file') {
+        const fileItem = getItem(itemId);
+        if (fileItem) {
+            openHtmlModal('previewHtml', fileItem);
+        }
+    }
+  }
+  itemDetailsPanel.addEventListener('click', handleOverviewItemClick);
+
+
+  function navigateToFolder(folderId) {
+    currentFolderId = folderId; selectedItemId = null; 
+    searchInput.value = ''; searchTerm = ''; 
+    showRootOverview = folderId === null && !searchTerm; 
+    itemsToBatchDownload.clear(); 
+    renderApp();
+  }
+
+  function selectItem(itemId) {
+    selectedItemId = itemId; 
+    if (!searchTerm) {
+        showRootOverview = false; 
+    }
+    renderApp(); 
+  }
+  
+  function openConfirmDeleteModal(item) {
+    modalTargetItem = item; 
+    confirmDeleteModalMessage.textContent = `您确定要删除 "${escapeHtml(item.name)}" 吗？此操作无法撤销。`;
+    showModal(confirmDeleteModal);
+  }
+  
+  function downloadFile(fileItem) {
+    if (!fileItem || fileItem.type !== 'file') return;
+    const blob = new Blob([fileItem.content], { type: fileItem.mimeType || 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileItem.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+
+  function handleItemAction(action, item) {
+    modalTargetItem = item; 
+    switch (action) {
+      case 'rename': openInputModal('renameItem', item); break;
+      case 'move': openMoveModal(item); break;
+      case 'preview': if (item.type === 'file') openHtmlModal('previewHtml', item); break;
+      case 'editHtml': if (item.type === 'file') openHtmlModal('editHtml', item); break;
+      case 'delete': 
+        openConfirmDeleteModal(item); 
+        break;
+      case 'downloadFile': 
+        if (item.type === 'file') downloadFile(item);
+        break;
+    }
+  }
+
+  confirmDeleteModalConfirmBtn.onclick = () => {
+    if (modalTargetItem) {
+        deleteItemFromState(modalTargetItem.id);
+    }
+    hideModal(confirmDeleteModal);
+  };
+
+  [confirmDeleteModalCloseBtn, confirmDeleteModalCancelBtn].forEach(el => {
+    el.onclick = () => hideModal(confirmDeleteModal);
+  });
+
+
+  function showModal(modalElement) { 
+    modalBackdrop.classList.remove('hidden'); 
+    modalElement.classList.remove('hidden'); 
+    if (modalElement === confirmDeleteModal) {
+        modalBackdrop.onclick = () => hideModal(confirmDeleteModal);
+    } else if (modalElement === inputModal) {
+        modalBackdrop.onclick = () => hideModal(inputModal);
+    } else if (modalElement === htmlModal) {
+        modalBackdrop.onclick = () => hideModal(htmlModal);
+    } else if (modalElement === moveModal) {
+        modalBackdrop.onclick = () => hideModal(moveModal);
+    } else {
+        modalBackdrop.onclick = null; 
+    }
+  }
+  function hideModal(modalElement) {
+    modalBackdrop.classList.add('hidden'); 
+    modalElement.classList.add('hidden');
+    currentModalType = null; 
+    inputModalField.value = ''; 
+    htmlModalEditTextarea.value = ''; 
+    htmlModalPreviewIframe.srcdoc = '';
+    modalBackdrop.onclick = null; 
+  }
+
+  function openInputModal(type, item = null) {
+    currentModalType = type; modalTargetItem = item;
+    if (type === 'createFolder') {
+      inputModalTitle.textContent = '创建新文件夹'; inputModalLabel.textContent = '文件夹名称:';
+      inputModalField.value = ''; inputModalField.placeholder = '例如：我的文档';
+    } else if (type === 'renameItem' && item) {
+      inputModalTitle.textContent = '重命名项目'; inputModalLabel.textContent = '新名称:';
+      inputModalField.value = item.name; inputModalField.placeholder = '';
+    }
+    inputModalField.focus(); showModal(inputModal);
+  }
+  
+  inputModalConfirmBtn.onclick = () => {
+    const name = inputModalField.value.trim(); if (!name) return;
+    if (currentModalType === 'createFolder') { addItemToState(name, 'folder', currentFolderId); }
+    else if (currentModalType === 'renameItem' && modalTargetItem) { renameItemInState(modalTargetItem.id, name); }
+    hideModal(inputModal);
+  };
+  
+  [inputModalCloseBtn, inputModalCancelBtn].forEach(el => { 
+    el.onclick = () => hideModal(inputModal); 
+  });
+
+
+  function openHtmlModal(type, fileItem) {
+    currentModalType = type; modalTargetItem = fileItem;
+    htmlModalTitle.textContent = `${type === 'previewHtml' ? '预览' : '编辑'}: ${escapeHtml(fileItem.name)}`;
+    htmlModalPreviewIframe.classList.add('hidden'); htmlModalEditTextarea.classList.add('hidden'); htmlModalSaveBtn.classList.add('hidden');
+    if (type === 'previewHtml') {
+        if (fileItem.mimeType === 'text/html') {
+            htmlModalPreviewIframe.srcdoc = fileItem.content; 
+            htmlModalPreviewIframe.classList.remove('hidden');
+        } else {
+            const pre = document.createElement('pre');
+            pre.className = 'text-sm whitespace-pre-wrap break-all max-h-[70vh] overflow-auto p-2 bg-slate-100 rounded';
+            pre.textContent = fileItem.content; 
+            const previewDiv = htmlModal.querySelector('.p-6.flex-grow'); 
+            const oldPre = previewDiv.querySelector('pre'); if (oldPre) previewDiv.removeChild(oldPre);
+            if (previewDiv.firstChild !== htmlModalPreviewIframe && previewDiv.firstChild !== htmlModalEditTextarea) {
+                 previewDiv.prepend(pre); 
+            } else { previewDiv.insertBefore(pre, previewDiv.firstChild); }
+        }
+    } else if (type === 'editHtml') {
+        htmlModalEditTextarea.value = fileItem.content;
+        htmlModalEditTextarea.classList.remove('hidden'); htmlModalSaveBtn.classList.remove('hidden');
+    }
+    showModal(htmlModal);
+  }
+
+  htmlModalSaveBtn.onclick = () => {
+    if (currentModalType === 'editHtml' && modalTargetItem) {
+        updateItemContentInState(modalTargetItem.id, htmlModalEditTextarea.value); hideModal(htmlModal);
+    }};
+  [htmlModalCloseBtn, htmlModalCancelBtn].forEach(el => { el.onclick = () => hideModal(htmlModal); });
+
+  function openMoveModal(item) {
+    currentModalType = 'moveItem'; modalTargetItem = item; selectedMoveTargetId = undefined; 
+    moveModalTitle.textContent = `移动 "${escapeHtml(item.name)}"`; renderMoveTargetList();
+    moveModalConfirmBtn.disabled = true; showModal(moveModal);
+  }
+
+  function renderMoveTargetList() {
+    moveTargetFolderListDiv.innerHTML = ''; 
+    const rootNode = createMoveTargetNode(null, "目录", 0); 
+    moveTargetFolderListDiv.appendChild(rootNode);
+    items.filter(i => i.type === 'folder' && i.parentId === null).sort((a,b) => a.name.localeCompare(b.name))
+         .forEach(folder => renderMoveFolderRecursive(folder, 0));
+  }
+
+  function renderMoveFolderRecursive(folder, depth) {
+    moveTargetFolderListDiv.appendChild(createMoveTargetNode(folder.id, folder.name, depth));
+    items.filter(i => i.parentId === folder.id && i.type === 'folder').sort((a,b) => a.name.localeCompare(b.name))
+        .forEach(childFolder => renderMoveFolderRecursive(childFolder, depth + 1));
+  }
+
+  function createMoveTargetNode(folderId, name, depth) {
+    const btn = document.createElement('button'); btn.type = 'button';
+    btn.className = `w-full text-left p-2 my-0.5 rounded-md flex items-center hover:bg-slate-200 text-slate-700`;
+    btn.style.paddingLeft = `${depth * 20 + 8}px`; 
+    btn.innerHTML = `${ICONS.folder.replace('text-blue-500', 'text-slate-500')} <span class="truncate ml-2">${escapeHtml(name)}</span>`;
+    btn.dataset.folderId = String(folderId); 
+    let isDisabled = false;
+    if (modalTargetItem) {
+        if (modalTargetItem.id === folderId) isDisabled = true; 
+        if (modalTargetItem.type === 'folder' && folderId && isDescendant(folderId, modalTargetItem.id)) isDisabled = true; 
+        if (modalTargetItem.parentId === folderId) isDisabled = true; 
+    }
+    if (isDisabled) {
+        btn.classList.add('opacity-50', 'cursor-not-allowed', 'bg-slate-100', 'text-slate-400'); btn.disabled = true;
+        let reason = '';
+        if (modalTargetItem && modalTargetItem.id === folderId) reason = '(项目本身)';
+        else if (modalTargetItem && modalTargetItem.type === 'folder' && folderId && isDescendant(folderId, modalTargetItem.id)) reason = '(子孙文件夹)';
+        else if (modalTargetItem && modalTargetItem.parentId === folderId) reason = '(当前位置)';
+        if (reason) btn.innerHTML += `<span class="ml-auto text-xs">${reason}</span>`;
+    } else {
+        btn.onclick = () => {
+            selectedMoveTargetId = folderId;
+            moveTargetFolderListDiv.querySelectorAll('button').forEach(b => {
+                b.classList.remove('bg-blue-500', 'text-white');
+                if (b.querySelector('svg')) { b.querySelector('svg').classList.remove('text-white'); b.querySelector('svg').classList.add('text-slate-500'); }
+            });
+            btn.classList.add('bg-blue-500', 'text-white');
+            if (btn.querySelector('svg')) { btn.querySelector('svg').classList.remove('text-slate-500'); btn.querySelector('svg').classList.add('text-white'); }
+            moveModalConfirmBtn.disabled = false;
+        };
+    }
+     if (selectedMoveTargetId === folderId && !isDisabled) {
+        btn.classList.add('bg-blue-500', 'text-white');
+        if (btn.querySelector('svg')) { btn.querySelector('svg').classList.replace('text-slate-500', 'text-white'); }
+    }
+    return btn;
+  }
+  
+  moveModalConfirmBtn.onclick = () => {
+    if (modalTargetItem && selectedMoveTargetId !== undefined) { 
+        moveItemInState(modalTargetItem.id, selectedMoveTargetId); hideModal(moveModal);
+    }};
+  [moveModalCloseBtn, moveModalCancelBtn].forEach(el => { el.onclick = () => hideModal(moveModal); });
+
+  // --- File Upload and Download ---
+  btnUploadHtml.onclick = () => fileUploadInput.click();
+  fileUploadInput.onchange = (event) => {
+    const files = event.target.files; 
+    if (files && files.length > 0) {
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            if (file.type === "text/html") {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    addItemToState(file.name, 'file', currentFolderId, { content: e.target.result, mimeType: 'text/html' });
+                };
+                reader.readAsText(file);
+            } else {
+                 addItemToState(file.name, 'file', currentFolderId, { content: `Cannot preview this file type (${file.type}) directly. Content not loaded.`, mimeType: file.type });
+            }
+        }
+    }
+    event.target.value = null; 
+  };
+
+  btnDownloadSelected.onclick = () => {
+    if (itemsToBatchDownload.size === 0) {
+        console.log("No files selected for download.");
+        return;
+    }
+    itemsToBatchDownload.forEach(itemId => {
+        const item = getItem(itemId);
+        if (item && item.type === 'file') {
+            downloadFile(item);
+        }
+    });
+  };
+  
+  function updateDownloadButtonState() {
+    btnDownloadSelected.disabled = itemsToBatchDownload.size === 0;
+  }
+  
+  function areAllCurrentFilesSelected() {
+    const currentFiles = getChildren(currentFolderId).filter(i => i.type === 'file');
+    if (currentFiles.length === 0) return false; 
+    return currentFiles.every(file => itemsToBatchDownload.has(file.id));
+  }
+
+  function updateSelectAllButtonState() {
+    const currentFiles = getChildren(currentFolderId).filter(i => i.type === 'file');
+    btnSelectAll.disabled = currentFiles.length === 0 || !!searchTerm; 
+    btnSelectAll.textContent = areAllCurrentFilesSelected() ? '取消全选' : '全选';
+  }
+
+  btnSelectAll.onclick = () => {
+    if (searchTerm) return; 
+    const currentFiles = getChildren(currentFolderId).filter(i => i.type === 'file');
+    const allSelected = areAllCurrentFilesSelected();
+
+    currentFiles.forEach(file => {
+        if (allSelected) { 
+            itemsToBatchDownload.delete(file.id);
+        } else { 
+            itemsToBatchDownload.add(file.id);
+        }
+    });
+    renderDirectoryTree(); 
+  };
+
+
+  
+  // --- Drag and Drop Handlers for Reordering and Moving ---
+  let dropIndicator = null; 
+
+  function showDropIndicator(targetButton, position) {
+    removeDropIndicator(); 
+    dropIndicator = document.createElement('div');
+    dropIndicator.className = `drop-indicator-line ${position}`;
+    targetButton.appendChild(dropIndicator);
+  }
+
+  function removeDropIndicator() {
+    if (dropIndicator && dropIndicator.parentElement) {
+      dropIndicator.parentElement.removeChild(dropIndicator);
+    }
+    dropIndicator = null;
+    document.querySelectorAll('.drop-target-active').forEach(el => el.classList.remove('drop-target-active'));
+  }
+
+
+  function handleDragStart(event, itemId) {
+    draggedItemId = itemId; 
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', itemId); 
+    event.currentTarget.parentElement.classList.add('dragging');
+  }
+
+  function handleDragEnd(event) {
+    if (event.currentTarget.parentElement) {
+      event.currentTarget.parentElement.classList.remove('dragging');
+    }
+    removeDropIndicator();
+    draggedItemId = null; 
+    currentDragTargetLi = null;
+  }
+
+  function handleDragOver(event) {
+    event.preventDefault(); 
+    const targetButton = event.currentTarget; 
+    const targetItemId = targetButton.dataset.itemId;
+    const draggedItem = getItem(draggedItemId);
+    if (!draggedItem) return;
+
+    removeDropIndicator(); 
+
+    if (targetButton.dataset.isRootArea === 'true') { 
+        if (draggedItem.parentId !== null) { 
+            targetButton.classList.add('drop-target-active'); 
+            event.dataTransfer.dropEffect = 'move';
+        } else {
+            event.dataTransfer.dropEffect = 'none';
+        }
+        return;
+    }
+
+    const targetItem = getItem(targetItemId);
+    if (!targetItem) return;
+
+    if (draggedItem.parentId === targetItem.parentId && draggedItemId !== targetItemId && !searchTerm) { 
+        event.dataTransfer.dropEffect = 'move';
+        const rect = targetButton.getBoundingClientRect();
+        const isDropAbove = event.clientY < rect.top + rect.height / 2;
+        showDropIndicator(targetButton, isDropAbove ? 'top' : 'bottom');
+        targetButton.dataset.dropReorderPosition = isDropAbove ? 'above' : 'below'; 
+    } else if (targetItem.type === 'folder' && draggedItemId !== targetItemId && draggedItem.parentId !== targetItemId) { 
+        if (!(draggedItem.type === 'folder' && isDescendant(targetItemId, draggedItemId))) {
+            targetButton.classList.add('drop-target-active');
+            event.dataTransfer.dropEffect = 'move';
+        } else {
+            event.dataTransfer.dropEffect = 'none';
+        }
+    } else {
+        event.dataTransfer.dropEffect = 'none'; 
+    }
+  }
+  
+  function handleDragLeave(event) {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+        removeDropIndicator();
+        event.currentTarget.classList.remove('drop-target-active');
+        delete event.currentTarget.dataset.dropReorderPosition;
+    }
+  }
+
+  function handleDrop(event) {
+    event.preventDefault();
+    removeDropIndicator();
+    
+    const targetButton = event.currentTarget;
+    let targetFolderId = targetButton.dataset.itemId; 
+    const isRootDrop = targetButton.dataset.isRootArea === 'true';
+
+    if (isRootDrop) targetFolderId = null;
+
+    const droppedItemId = draggedItemId; 
+    if (!droppedItemId) return;
+
+    const draggedItem = getItem(droppedItemId);
+    if (!draggedItem) return;
+
+    if (targetButton.dataset.dropReorderPosition && draggedItem.parentId === (isRootDrop ? null : getItem(targetFolderId)?.parentId) && !searchTerm) { // Reordering
+        const parentId = draggedItem.parentId;
+        let siblings = getChildren(parentId).filter(i => i.id !== droppedItemId);
+        
+        const targetItemForReorder = getItem(targetFolderId); 
+        if (!targetItemForReorder) { 
+             draggedItemId = null; return;
+        }
+
+        let dropIndex = siblings.findIndex(s => s.id === targetItemForReorder.id);
+
+        if (targetButton.dataset.dropReorderPosition === 'above') {
+            siblings.splice(dropIndex, 0, draggedItem);
+        } else { // 'below'
+            siblings.splice(dropIndex + 1, 0, draggedItem);
+        }
+        
+        siblings.forEach((sibling, index) => {
+            const originalItem = getItem(sibling.id);
+            if (originalItem) originalItem.order = index;
+        });
+
+    } else if (isRootDrop && draggedItem.parentId !== null) { // Moving to root area
+        moveItemInState(droppedItemId, null);
+    } else { // Moving to a folder
+        const targetItem = getItem(targetFolderId);
+        if (targetItem && targetItem.type === 'folder' && draggedItemId !== targetFolderId && draggedItem.parentId !== targetFolderId) {
+            if (!(draggedItem.type === 'folder' && isDescendant(targetFolderId, draggedItemId))) {
+                 moveItemInState(droppedItemId, targetFolderId);
+            }
+        }
+    }
+    delete targetButton.dataset.dropReorderPosition;
+    draggedItemId = null; 
+    renderApp();
+  }
+  
+
+  searchInput.addEventListener('input', (e) => { 
+    searchTerm = e.target.value;
+    itemsToBatchDownload.clear(); 
+    if (searchTerm) {
+        showRootOverview = false;
+        selectedItemId = null; 
+    } else {
+        showRootOverview = currentFolderId === null;
+    }
+    renderApp(); 
+  });
+
+  function renderApp() { 
+    renderBreadcrumbs(); 
+    renderDirectoryTree(); 
+    renderItemDetails(); 
+  }
+  btnCreateFolder.onclick = () => openInputModal('createFolder');
+  
+  function assignInitialOrder() {
+    const parentGroups = {};
+    items.forEach(item => {
+        const parentKey = item.parentId === null ? 'null_root' : item.parentId; 
+        if (!parentGroups[parentKey]) {
+            parentGroups[parentKey] = [];
+        }
+        parentGroups[parentKey].push(item);
+    });
+
+    for (const parentKey in parentGroups) {
+        parentGroups[parentKey].sort((a, b) => {
+            if (a.order !== undefined && b.order !== undefined) {
+                return a.order - b.order;
+            }
+            if (a.type === 'folder' && b.type === 'file') return -1;
+            if (a.type === 'file' && b.type === 'folder') return 1;
+            return a.name.localeCompare(b.name);
+        }).forEach((item, index) => {
+            if (item.order === undefined) {
+                 item.order = index;
+            }
+        });
+    }
+    for (const parentKey in parentGroups) {
+        reOrderItemsInFolder(parentKey === 'null_root' ? null : parentKey);
+    }
+  }
+
+
+  document.addEventListener('DOMContentLoaded', () => {
+    assignInitialOrder(); 
+    navigateToFolder(null); 
+  });
+
+</script>
+</body>
+</html>
+```
+这些注释是之前版本中留下的，现在已经移除了。代码的功能不受
