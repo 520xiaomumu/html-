@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>魂斗罗 JS 版 - V10 (自动射击)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #1a1a1a;
+            font-family: 'Arial', sans-serif;
+            color: #fff;
+            overflow: hidden;
+        }
+        #gameContainer {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #gameCanvas {
+            border: 2px solid #666;
+            background-color: #0d0d0d;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        .controls-info {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #2c2c2c;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            font-size: 0.9em;
+        }
+        .controls-info h3 {
+            margin-top: 0; margin-bottom: 5px;
+            color: #00bcd4;
+            text-align: center;
+        }
+        .controls-info p {
+            margin: 3px 0;
+            line-height: 1.5;
+        }
+        .controls-info kbd {
+            background-color: #4f4f4f;
+            border-radius: 3px;
+            padding: 2px 5px;
+            border: 1px solid #777;
+        }
+        #gameMessage, #startButtonContainer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 10;
+        }
+        #gameMessage {
+            font-size: 2em;
+            color: #ffeb3b;
+            background-color: rgba(0,0,0,0.8);
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+            box-shadow: 0 0 15px rgba(255,235,59,0.5);
+        }
+        #startButton, #muteButton {
+            padding: 15px 30px;
+            font-size: 1.5em;
+            color: white;
+            background-color: #4CAF50;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 4px #388E3C;
+            transition: all 0.1s ease-in-out;
+        }
+        #startButton:hover, #muteButton:hover { background-color: #45a049; }
+        #startButton:active, #muteButton:active { background-color: #3e8e41; box-shadow: 0 2px #2e6b30; transform: translateY(2px); }
+        #muteButton {
+            position: fixed; top: 20px; right: 20px;
+            padding: 10px 15px; font-size: 1em;
+            background-color: #f44336; box-shadow: 0 4px #d32f2f;
+            display: none;
+        }
+        #muteButton:hover { background-color: #e53935;}
+        #muteButton:active { background-color: #d32f2f; box-shadow: 0 2px #b71c1c; transform: translateY(2px);}
+        .title { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <h1 class="title">魂斗罗 JS 版 (简化版 V10)</h1>
+        <div id="startButtonContainer"><button id="startButton">开始游戏</button></div>
+        <canvas id="gameCanvas"></canvas>
+        <div id="gameMessage"></div>
+        <button id="muteButton">静音</button>
+    </div>
+    <div class="controls-info">
+        <h3>游戏控制</h3>
+        <p><kbd>A</kbd>/<kbd>←</kbd>:左移 <kbd>D</kbd>/<kbd>→</kbd>:右移 <kbd>W</kbd>/<kbd>↑</kbd>/<kbd>空格</kbd>:跳跃(可二段,可踩所有怪) <kbd>S</kbd>/<kbd>↓</kbd>:下蹲 (自动射击)</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameMessageElement = document.getElementById('gameMessage');
+        const startButton = document.getElementById('startButton');
+        const startButtonContainer = document.getElementById('startButtonContainer');
+        const muteButton = document.getElementById('muteButton');
+
+        canvas.width = 800; canvas.height = 500;
+
+        const AudioManager = {
+            isMuted: false, isInitialized: false, synths: {}, bgm: null, bgmLoop: null, gameOverSequence: null,
+            async init() { 
+                if (this.isInitialized) return; 
+                await Tone.start(); 
+                console.log("Audio context started"); 
+                this.synths.playerShoot = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 } }).toDestination(); 
+                this.synths.playerJump = new Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.05, release: 0.1 } }).toDestination(); 
+                this.synths.playerHit = new Tone.Synth({ oscillator: { type: 'sawtooth' }, envelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 0.1 }, volume: -10 }).toDestination(); 
+                
+                this.synths.enemyDefeated = new Tone.FMSynth({
+                    harmonicity: 1.5, modulationIndex: 5, detune: 0,
+                    oscillator: { type: "sine" }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.01, release: 0.5 },
+                    modulation: { type: "square" }, modulationEnvelope: { attack: 0.02, decay: 0.2, sustain: 0, release: 0.5 },
+                    volume: -15
+                }).toDestination();
+                this.synths.enemyDefeated.frequency.value = "C3"; 
+                this.synths.enemyDefeated.frequency.rampTo("A2", 0.4); 
+
+                this.synths.enemyShoot = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.005, decay: 0.08, sustain: 0, release: 0.05 }, volume: -15 }).toDestination(); 
+                this.synths.powerUp = new Tone.Synth({ oscillator: {type: 'triangle'}, envelope: {attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2}, volume: -8 }).toDestination(); 
+                
+                this.synths.gameOverSound = new Tone.Synth({
+                    oscillator: { type: 'triangle' },
+                    envelope: { attack: 0.05, decay: 0.2, sustain: 0.1, release: 0.3 },
+                    volume: -8
+                }).toDestination();
+                
+                const gameOverNotes = ["G3", "F3", "E3", "D3"]; 
+                this.gameOverSequence = new Tone.Sequence((time, note) => {
+                    this.synths.gameOverSound.triggerAttackRelease(note, "4n", time);
+                }, gameOverNotes, "4n"); 
+                this.gameOverSequence.loop = false;
+
+                this.bgm = new Tone.Synth({ oscillator: { type: 'pwm', modulationFrequency: 0.2 }, envelope: { attack: 0.02, decay: 0.1, sustain: 0.2, release: 0.2 }, volume: -23 }).toDestination(); 
+                const bgmNotes = ["C3","D#3","G3","C4","G3","D#3"]; let bgmNoteIndex = 0; 
+                this.bgmLoop = new Tone.Loop(time => { if (this.bgm) { this.bgm.triggerAttackRelease(bgmNotes[bgmNoteIndex % bgmNotes.length], "8n", time); bgmNoteIndex++; }}, "4n").start(0); 
+                this.isInitialized = true; 
+            },
+            playSound(effectName, note = null, duration = "8n") {
+                if (this.isMuted || !this.isInitialized || !this.synths[effectName]) return;
+                try {
+                    const synth = this.synths[effectName];
+                    const timeToPlay = Tone.now() + 0.02; // Schedule slightly in the future
+
+                    if (synth instanceof Tone.Synth || synth instanceof Tone.FMSynth || synth instanceof Tone.MembraneSynth) {
+                        // Stop any previous sound from this synth instance immediately
+                        if (synth.envelope) { 
+                           synth.triggerRelease(Tone.now()); // Release immediately
+                        }
+                        // Schedule the new sound
+                        synth.triggerAttackRelease(note || synth.frequency.value, duration, timeToPlay);
+                    } else if (synth instanceof Tone.NoiseSynth) {
+                        synth.triggerAttack(timeToPlay); 
+                    } else if (synth.triggerAttackRelease) { 
+                        synth.triggerAttackRelease(note, duration, timeToPlay);
+                    } else if (synth.triggerAttack) { 
+                        synth.triggerAttack(timeToPlay);
+                    }
+                } catch (e) {
+                    console.error(`Error playing sound ${effectName}:`, e);
+                }
+            },
+            playGameOverSequence() {
+                if (this.isMuted || !this.isInitialized || !this.gameOverSequence) return;
+                this.gameOverSequence.start(Tone.now());
+            },
+            startBGM() { if (this.isInitialized && Tone.Transport.state !== "started") { Tone.Transport.start(); console.log("BGM started"); }},
+            stopBGM() { if (this.isInitialized && Tone.Transport.state === "started") { Tone.Transport.stop(); Tone.Transport.cancel(); bgmNoteIndex = 0; console.log("BGM stopped");}}, 
+            toggleMute() { this.isMuted = !this.isMuted; Tone.Destination.mute = this.isMuted; muteButton.textContent = this.isMuted ? "取消静音" : "静音"; console.log(this.isMuted?"Muted":"Unmuted");}
+        };
+
+        const GAME_SETTINGS = {
+            playerSpeed:5,jumpVelocityStart:-13,gravity:0.6,bulletSpeed:12,enemyBulletSpeed:7.5,enemySpeed:2.2,playerLivesStart:3,groundHeight:canvas.height-50,scrollMargin:canvas.width/3,enemySpawnInterval:1800,maxEnemies:6,bulletCooldown:270,playerOriginalWidth:30,playerOriginalHeight:50,playerCrouchHeight:25,
+            enemyAirborneChance:0.25, 
+            enemyShootingChance:0.2, 
+            enemyShootCooldown:1500,
+            powerUpDropChance:0.25, 
+            powerUpDuration:10000,playerRunFrameDuration:90,enemyRunFrameDuration:150,enemyHitFlashDuration:100,playerMaxJumps:2,airJumpMultiplier:0.9,
+            platformSpawnInterval: 4000, 
+            maxPlatforms: 5, 
+            stompBounceVelocity: -7, 
+            shieldPowerUpColor: '#03A9F4', 
+            shieldPlayerColor: 'rgba(3, 169, 244, 0.5)', 
+        };
+
+        let player, bullets=[], enemyBullets=[], enemies=[], powerUps=[], platforms=[], keys={}, gameRunning=true, score=0, cameraX=0, lastEnemySpawnTime=0, lastPlayerShotTime=0, lastPlatformSpawnTime = 0, backgroundStars=[], backgroundHills=[];
+        function random(min,max){return Math.random()*(max-min)+min;}
+
+        function createStars(c){for(let i=0;i<c;i++)backgroundStars.push({x:random(0,canvas.width*2),y:random(0,GAME_SETTINGS.groundHeight-100),size:random(1,3),opacity:random(0.3,0.8)})}
+        function createHills(c){const hM=120,hN=40;let cX=-50;for(let i=0;i<c;i++){const w=random(150,300),h=random(hN,hM);backgroundHills.push({x:cX,y:GAME_SETTINGS.groundHeight-h,width:w,height:h,color:`hsl(${random(190,220)},30%,${random(25,40)}%)`});cX+=w*random(0.7,0.9)}}
+        function drawBackground(){ctx.fillStyle='#080E1A';ctx.fillRect(0,0,canvas.width,canvas.height);const pS=0.1;backgroundStars.forEach(s=>{let x=(s.x-cameraX*pS)%(canvas.width*1.5);if(x<-s.size)x+=(canvas.width*1.5);ctx.fillStyle=`rgba(255,255,220,${s.opacity})`;ctx.beginPath();ctx.arc(x,s.y,s.size/2,0,Math.PI*2);ctx.fill()});const pH=0.3;backgroundHills.forEach(h=>{let x=h.x-cameraX*pH;if(x+h.width>0&&x<canvas.width){ctx.fillStyle=h.color;ctx.beginPath();ctx.moveTo(x,GAME_SETTINGS.groundHeight);ctx.lineTo(x,h.y);ctx.quadraticCurveTo(x+h.width/2,h.y-random(10,30),x+h.width,h.y);ctx.lineTo(x+h.width,GAME_SETTINGS.groundHeight);ctx.closePath();ctx.fill()}});ctx.fillStyle='#3a2e20';ctx.fillRect(0,GAME_SETTINGS.groundHeight,canvas.width,canvas.height-GAME_SETTINGS.groundHeight)}
+
+        class Platform { 
+            constructor(x, y, width, height) { this.x = x; this.y = y; this.width = width; this.height = height; this.color = '#8D6E63'; }
+            draw() { ctx.fillStyle = this.color; ctx.fillRect(this.x - cameraX, this.y, this.width, this.height); ctx.strokeStyle = '#795548'; ctx.lineWidth = 1; for (let i = 0; i < this.width; i += 20) { ctx.beginPath(); ctx.moveTo(this.x - cameraX + i, this.y); ctx.lineTo(this.x - cameraX + i, this.y + this.height); ctx.stroke(); } for (let j = 0; j < this.height; j += 20) { ctx.beginPath(); ctx.moveTo(this.x - cameraX, this.y + j); ctx.lineTo(this.x - cameraX + this.width, this.y + j); ctx.stroke(); } }
+        }
+
+        class Player {
+            constructor(x,y,c){
+                this.x=x;this.y=y;this.width=GAME_SETTINGS.playerOriginalWidth;
+                this.originalHeight=GAME_SETTINGS.playerOriginalHeight;this.height=this.originalHeight;
+                this.crouchHeight=GAME_SETTINGS.playerCrouchHeight;this.color=c;
+                this.velocityX=0;this.velocityY=0;this.onGround=false;this.isCrouching=false;
+                this.lives=GAME_SETTINGS.playerLivesStart;this.direction=1;
+                this.bulletCooldown=GAME_SETTINGS.bulletCooldown;
+                this.powerUpActive=null;this.powerUpTimer=0;
+                this.isShieldActive = false; 
+                this.runFrame=0;this.runFrameTimer=0;this.runFrameDuration=GAME_SETTINGS.playerRunFrameDuration;
+                this.gunLength=this.width*0.6;this.gunHeight=this.height*0.15;
+                this.maxJumps = GAME_SETTINGS.playerMaxJumps;this.jumpsLeft = this.maxJumps;this.isPerformingJump = false;
+            }
+            draw(){ 
+                let currentPlayerColor = this.color; if (this.powerUpActive === 'rapidFire') currentPlayerColor = '#FFA500';
+                const hC='#FFDBAC',lC=this.color,gC='#888888'; ctx.save();ctx.translate(this.x-cameraX+this.width/2,this.y+this.height);if(this.direction===-1)ctx.scale(-1,1);
+                const bH=this.height*0.6,hR=this.width*0.3,lW=this.width*0.25,lH=this.height*0.4; ctx.fillStyle=currentPlayerColor;ctx.fillRect(-this.width/2,-this.height,this.width,bH);
+                ctx.fillStyle=gC;let gYO=-this.height+bH*0.4;if(this.isCrouching)gYO=-this.height+bH*0.3;else if(!this.onGround)gYO=-this.height+bH*0.35;ctx.fillRect(this.width*0.1,gYO-this.gunHeight/2,this.gunLength,this.gunHeight);
+                ctx.fillStyle=hC;ctx.beginPath();ctx.arc(0,-this.height+hR-bH,hR,0,Math.PI*2);ctx.fill();
+                ctx.fillStyle='white';ctx.fillRect(hR*0.2,-this.height+hR*0.8-bH,hR*0.3,hR*0.3);
+                ctx.fillStyle=lC;if(this.isCrouching)ctx.fillRect(-this.width/2,-lH*0.5,this.width,lH*0.5);else if(!this.onGround){ctx.fillRect(-lW*1.5,-lH,lW,lH*0.8);ctx.fillRect(lW*0.5,-lH*0.9,lW,lH*0.7)}else if(this.velocityX!==0){if(this.runFrame===0){ctx.fillRect(-lW*1.5,-lH,lW,lH);ctx.fillRect(lW*0.5,-lH*0.8,lW,lH)}else{ctx.fillRect(-lW*1.5,-lH*0.8,lW,lH);ctx.fillRect(lW*0.5,-lH,lW,lH)}}else{ctx.fillRect(-lW*1.5,-lH,lW,lH);ctx.fillRect(lW*0.5,-lH,lW,lH)}
+                ctx.restore();
+                if (this.isShieldActive) { ctx.beginPath(); ctx.arc(this.x - cameraX + this.width / 2, this.y + this.height / 2, this.width * 0.8, 0, Math.PI * 2); ctx.fillStyle = GAME_SETTINGS.shieldPlayerColor; ctx.fill(); }
+            }
+            performJump(isAirJump=false){if(this.onGround)this.jumpsLeft=this.maxJumps;if(this.jumpsLeft>0){this.velocityY=GAME_SETTINGS.jumpVelocityStart*(isAirJump?GAME_SETTINGS.airJumpMultiplier:1);this.onGround=false;this.isPerformingJump=true;this.jumpsLeft--;AudioManager.playSound('playerJump',isAirJump?'E5':'C5','16n');}}
+            update(dT){
+                if(this.powerUpActive){this.powerUpTimer-=dT;if(this.powerUpTimer<=0)this.deactivatePowerUp()}
+                if(keys['s']||keys['arrowdown']){if(this.onGround&&!this.isPerformingJump){if(!this.isCrouching){this.isCrouching=true;const d=this.originalHeight-this.crouchHeight;this.y+=d;this.height=this.crouchHeight}}}
+                else{if(this.isCrouching){this.isCrouching=false;const d=this.originalHeight-this.crouchHeight;this.y-=d;this.height=this.originalHeight}}
+                this.velocityX=0;if(!this.isCrouching){if(keys['a']||keys['arrowleft']){this.velocityX=-GAME_SETTINGS.playerSpeed;this.direction=-1}if(keys['d']||keys['arrowright']){this.velocityX=GAME_SETTINGS.playerSpeed;this.direction=1}}
+                this.x+=this.velocityX;
+                if(this.velocityX!==0&&this.onGround&&!this.isCrouching){this.runFrameTimer+=dT;if(this.runFrameTimer>=this.runFrameDuration){this.runFrameTimer=0;this.runFrame=(this.runFrame+1)%2}}else{this.runFrameTimer=0}
+                
+                this.velocityY+=GAME_SETTINGS.gravity;
+                this.y+=this.velocityY;
+
+                this.onGround = false; 
+                platforms.forEach(platform => { 
+                    if (this.velocityY >= 0 && this.x < platform.x + platform.width && this.x + this.width > platform.x && this.y + this.height >= platform.y && this.y + this.height - this.velocityY < platform.y + 1 ) { this.y = platform.y - this.height; this.velocityY = 0; this.onGround = true; this.jumpsLeft = this.maxJumps; this.isPerformingJump = false; }
+                    else if (this.velocityY < 0 && this.x < platform.x + platform.width && this.x + this.width > platform.x && this.y <= platform.y + platform.height && this.y - this.velocityY > platform.y + platform.height -1 ) { this.y = platform.y + platform.height; this.velocityY = 0; }
+                    else if (this.x + this.width > platform.x && this.x < platform.x + platform.width && this.y + this.height > platform.y + 5 && this.y < platform.y + platform.height - 5) { if (this.velocityX > 0 && this.x + this.width - this.velocityX <= platform.x) { this.x = platform.x - this.width; this.velocityX = 0; } else if (this.velocityX < 0 && this.x - this.velocityX >= platform.x + platform.width) { this.x = platform.x + platform.width; this.velocityX = 0; } }
+                });
+
+                if(this.y+this.height>=GAME_SETTINGS.groundHeight && !this.onGround){ 
+                    this.y=GAME_SETTINGS.groundHeight-this.height;this.velocityY=0;
+                    if(!this.onGround) { 
+                        this.jumpsLeft = this.maxJumps; this.isPerformingJump = false;
+                    }
+                    this.onGround=true;
+                }
+                
+                if(this.x<0)this.x=0; if(this.x-cameraX<0)this.x=cameraX;
+                if(this.x+this.width-cameraX>canvas.width)this.x=canvas.width+cameraX-this.width;
+                
+                this.shoot(); 
+            }
+            shoot(){const cT=Date.now();if(cT-lastPlayerShotTime>this.bulletCooldown){let bOX,bOY;const gVLFP=this.width*0.1+this.gunLength;let gVCY_FTP;const cVGH=this.height*0.15;if(this.isCrouching){gVCY_FTP=this.height+(-this.height+(this.height*0.6)*0.3-cVGH/2)}else if(!this.onGround){gVCY_FTP=this.height+(-this.height+(this.height*0.6)*0.35-cVGH/2)}else{gVCY_FTP=this.height+(-this.height+(this.height*0.6)*0.4-cVGH/2)}bOY=this.y+gVCY_FTP;if(this.direction===1){bOX=this.x+this.width/2+gVLFP-(this.gunLength*0.2)}else{bOX=this.x+this.width/2-gVLFP+(this.gunLength*0.2)}bullets.push(new Bullet(bOX,bOY,10,5,'yellow',this.direction,GAME_SETTINGS.bulletSpeed));lastPlayerShotTime=cT;AudioManager.playSound('playerShoot')}}
+            activatePowerUp(t){ 
+                this.powerUpActive=t; this.powerUpTimer=GAME_SETTINGS.powerUpDuration;
+                if(t==='rapidFire'){this.bulletCooldown=GAME_SETTINGS.bulletCooldown/2;AudioManager.playSound('powerUp','G5','8n');}
+                else if (t === 'shield') {this.isShieldActive = true; AudioManager.playSound('powerUp','A5','8n');} 
+                console.log(`${t} Activated!`);
+            }
+            deactivatePowerUp(){
+                if(this.powerUpActive==='rapidFire')this.bulletCooldown=GAME_SETTINGS.bulletCooldown;
+                if(this.powerUpActive==='shield') this.isShieldActive = false;
+                this.powerUpActive=null;this.powerUpTimer=0;console.log("Power Up Deactivated.")
+            }
+            hit(){
+                if (this.isShieldActive) { this.isShieldActive = false; this.powerUpActive = null; this.powerUpTimer = 0; AudioManager.playSound('playerHit', 'E4', '8n'); console.log("Shield broken!"); return; }
+                this.lives--;this.deactivatePowerUp();AudioManager.playSound('playerHit','A3','4n');if(this.isCrouching){const d=this.originalHeight-this.crouchHeight;this.y-=d;this.height=this.originalHeight;this.isCrouching=false}if(this.lives<=0)gameOver();else{this.x=cameraX+50;this.y=GAME_SETTINGS.groundHeight-this.originalHeight-50;this.velocityY=0;this.jumpsLeft=this.maxJumps;this.isPerformingJump=false;console.log("Player hit! Lives left:"+this.lives)}}
+        }
+
+        class Bullet{ constructor(x,y,w,h,c,d,s){this.x=x;this.y=y;this.width=w;this.height=h;this.color=c;this.direction=d;this.speed=s}draw(){ctx.fillStyle=this.color;ctx.fillRect(this.x-cameraX,this.y,this.width,this.height)}update(){this.x+=this.speed*this.direction}}
+        class Enemy{
+            constructor(x,y,w,h,c,sM=1,iS=false){this.x=x;this.y=y;this.width=w;this.height=h;this.originalColor=c;this.color=c;this.speed=GAME_SETTINGS.enemySpeed*sM;this.direction=-1;this.isShooter=iS;this.lastShotTime=Date.now()+random(0,GAME_SETTINGS.enemyShootCooldown);this.isOnGround=(this.y+this.height>=GAME_SETTINGS.groundHeight-1);this.runFrame=0;this.runFrameTimer=0;this.isHit=false;this.hitTimer=0; this.stompable = true;}
+            draw(){ctx.fillStyle=this.color;ctx.fillRect(this.x-cameraX,this.y,this.width,this.height);if(this.isShooter){ctx.fillStyle='#666';const gW=this.width*0.4,gH=this.height*0.2,gX=(player&&player.x<this.x)?(this.x-cameraX-gW):(this.x-cameraX+this.width),gY=this.y+this.height*0.4;ctx.fillRect(gX,gY,gW,gH)}if(this.isOnGround&&!this.isShooter){ctx.fillStyle='#555';const lW=this.width*0.3,lH=this.height*0.2;if(this.runFrame===0){ctx.fillRect(this.x-cameraX+lW*0.5,this.y+this.height,lW,lH);ctx.fillRect(this.x-cameraX+this.width-lW*1.5,this.y+this.height,lW,lH*0.8)}else{ctx.fillRect(this.x-cameraX+lW*0.5,this.y+this.height,lW,lH*0.8);ctx.fillRect(this.x-cameraX+this.width-lW*1.5,this.y+this.height,lW,lH)}}}
+            update(dT){this.x+=this.speed*this.direction;if(this.isHit){this.hitTimer+=dT;this.color=(Math.floor(this.hitTimer/50)%2===0)?'white':this.originalColor;if(this.hitTimer>=GAME_SETTINGS.enemyHitFlashDuration)this.toBeRemoved=true;return}if(this.isOnGround&&!this.isShooter){this.runFrameTimer+=dT;if(this.runFrameTimer>=GAME_SETTINGS.enemyRunFrameDuration){this.runFrameTimer=0;this.runFrame=(this.runFrame+1)%2}}if(this.isShooter){const cT=Date.now();if(cT-this.lastShotTime>GAME_SETTINGS.enemyShootCooldown){let sD=(player&&player.x+player.width/2<this.x+this.width/2)?-1:1;const bX=sD===1?this.x+this.width+5:this.x-5,bY=this.y+this.height/2;enemyBullets.push(new Bullet(bX,bY,8,4,'pink',sD,GAME_SETTINGS.enemyBulletSpeed));this.lastShotTime=cT;AudioManager.playSound('enemyShoot')}}}
+            takeHit(isStomp = false){ if(!this.isHit){ this.isHit=true; this.hitTimer=0; AudioManager.playSound('enemyDefeated', null, '2n'); }}
+        }
+        class PowerUp{
+            constructor(x,y,type){this.x=x;this.y=y;this.width=20;this.height=20;this.type=type; this.color = type === 'rapidFire' ? '#4CAF50' : GAME_SETTINGS.shieldPowerUpColor; }
+            draw(){ctx.fillStyle=this.color;ctx.fillRect(this.x-cameraX,this.y,this.width,this.height);ctx.fillStyle='white';ctx.font='bold 14px Arial';ctx.textAlign='center'; let text = 'P'; if (this.type === 'rapidFire') text = 'R'; else if (this.type === 'shield') text = 'S'; ctx.fillText(text,this.x-cameraX+this.width/2,this.y+this.height*0.75); }
+        }
+
+        let lastTime = 0;
+        function initGameLogic() { 
+            player = new Player(50, GAME_SETTINGS.groundHeight - GAME_SETTINGS.playerOriginalHeight, '#009688');
+            bullets = []; enemyBullets = []; enemies = []; powerUps = []; platforms = [];
+            keys = {}; score = 0; cameraX = 0;
+            player.lives = GAME_SETTINGS.playerLivesStart;
+            gameRunning = true; gameMessageElement.style.display = 'none';
+            lastEnemySpawnTime = Date.now(); lastPlatformSpawnTime = Date.now(); lastTime = Date.now();
+            if (backgroundStars.length === 0) createStars(100);
+            if (backgroundHills.length === 0) createHills(15);
+            AudioManager.startBGM(); gameLoop();
+        }
+
+        startButton.addEventListener('click', async () => { await AudioManager.init(); startButtonContainer.style.display = 'none'; muteButton.style.display = 'block'; initGameLogic(); });
+        muteButton.addEventListener('click', () => AudioManager.toggleMute());
+        window.addEventListener('keydown', (e) => { const key = e.key.toLowerCase(); keys[key] = true; if ([' ', 'arrowup', 'w', 's', 'arrowdown'].includes(key)) e.preventDefault(); if ((key === ' ' || key === 'arrowup' || key === 'w') && player && !player.isCrouching) { if (player.onGround) player.performJump(); else if (player.jumpsLeft > 0) player.performJump(true); }}); 
+        window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+
+        function spawnPlatform() { 
+            const currentTime = Date.now(); if (platforms.length < GAME_SETTINGS.maxPlatforms && currentTime - lastPlatformSpawnTime > GAME_SETTINGS.platformSpawnInterval) { const width = random(80, 150); const height = 20; const x = cameraX + canvas.width + random(50, 100); const y = random(GAME_SETTINGS.groundHeight - GAME_SETTINGS.playerOriginalHeight * 2.5, GAME_SETTINGS.groundHeight - GAME_SETTINGS.playerOriginalHeight * 1.2); platforms.push(new Platform(x, y, width, height)); lastPlatformSpawnTime = currentTime; }
+        }
+        
+        function checkCollisions(){ 
+            for(let i=bullets.length-1;i>=0;i--){for(let j=enemies.length-1;j>=0;j--){if(!bullets[i]||!enemies[j]||enemies[j].isHit)continue;if(bullets[i].x<enemies[j].x+enemies[j].width&&bullets[i].x+bullets[i].width>enemies[j].x&&bullets[i].y<enemies[j].y+enemies[j].height&&bullets[i].y+bullets[i].height>enemies[j].y){bullets.splice(i,1);enemies[j].takeHit();score+=10;break}}}
+            for(let i=enemyBullets.length-1;i>=0;i--){if(!enemyBullets[i]||!player)continue;if(enemyBullets[i].x<player.x+player.width&&enemyBullets[i].x+enemyBullets[i].width>player.x&&enemyBullets[i].y<player.y+player.height&&enemyBullets[i].y+enemyBullets[i].height>player.y){enemyBullets.splice(i,1);player.hit();break}}
+            for(let i=enemies.length-1;i>=0;i--){ if(!enemies[i]||!player||enemies[i].isHit)continue; const enemy = enemies[i]; if (player.velocityY > 0 && enemy.stompable && player.x < enemy.x + enemy.width && player.x + player.width > enemy.x && player.y + player.height >= enemy.y && player.y + player.height - player.velocityY < enemy.y + enemy.height * 0.5 ) { enemy.takeHit(true); player.velocityY = GAME_SETTINGS.stompBounceVelocity; player.jumpsLeft = player.maxJumps -1; score += 15; } else if (player.x < enemy.x + enemy.width && player.x + player.width > enemy.x && player.y < enemy.y + enemy.height && player.y + player.height > enemy.y) { const cE=enemies.splice(i,1)[0]; if(cE&&Math.random()<GAME_SETTINGS.powerUpDropChance*0.5)powerUps.push(new PowerUp(cE.x,cE.y,Math.random()<0.5?'rapidFire':'shield')); player.hit();break } }
+            for(let i=powerUps.length-1;i>=0;i--){if(!powerUps[i]||!player)continue;if(player.x<powerUps[i].x+powerUps[i].width&&player.x+player.width>powerUps[i].x&&player.y<powerUps[i].y+powerUps[i].height&&player.y+player.height>powerUps[i].y){player.activatePowerUp(powerUps[i].type);powerUps.splice(i,1);break}}}
+
+        function spawnEnemy(){ const cT=Date.now();if(enemies.length<GAME_SETTINGS.maxEnemies&&cT-lastEnemySpawnTime>GAME_SETTINGS.enemySpawnInterval){const h=random(30,50),w=random(20,40),x=cameraX+canvas.width+random(50,200);let y,sM=1,iS=Math.random()<GAME_SETTINGS.enemyShootingChance;const clr=iS?'#9C27B0':'#F44336';let onPlatform = false; if (platforms.length > 0 && Math.random() < 0.4) { const p = platforms[Math.floor(random(0, platforms.length))]; if (p.x - cameraX < canvas.width && p.x - cameraX + p.width > 0) { y = p.y - h; onPlatform = true; } } if (!onPlatform) { if(Math.random()<GAME_SETTINGS.enemyAirborneChance&&!iS){y=random(GAME_SETTINGS.groundHeight-180,GAME_SETTINGS.groundHeight-80);sM=1.2}else{y=GAME_SETTINGS.groundHeight-h} } enemies.push(new Enemy(x,y,w,h,clr,sM,iS));lastEnemySpawnTime=cT}}
+        function updateEntities(dT){ 
+            for(let i=platforms.length-1; i>=0; i--) { if (platforms[i].x - cameraX + platforms[i].width < 0) platforms.splice(i,1); }
+            for(let i=enemies.length-1;i>=0;i--){if(enemies[i]){enemies[i].update(dT);if(enemies[i].toBeRemoved){const dE=enemies.splice(i,1)[0];if(dE&&Math.random()<GAME_SETTINGS.powerUpDropChance)powerUps.push(new PowerUp(dE.x,dE.y,Math.random()<0.5?'rapidFire':'shield'));continue}if(enemies[i].x+enemies[i].width<cameraX-150)enemies.splice(i,1)}else enemies.splice(i,1)}
+            bullets.forEach((b,i)=>{if(b){b.update();if(b.x-cameraX>canvas.width+b.width||b.x-cameraX<0-b.width)bullets.splice(i,1)}else bullets.splice(i,1)});
+            enemyBullets.forEach((eb,i)=>{if(eb){eb.update();if(eb.x-cameraX>canvas.width+eb.width||eb.x-cameraX<0-eb.width)enemyBullets.splice(i,1)}else enemyBullets.splice(i,1)})
+        }
+
+        function updateCamera(){ if(player.x-cameraX>canvas.width-GAME_SETTINGS.scrollMargin&&player.velocityX>0)cameraX=player.x-(canvas.width-GAME_SETTINGS.scrollMargin);if(player.x-cameraX<GAME_SETTINGS.scrollMargin&&player.velocityX<0&&cameraX>0)cameraX=player.x-GAME_SETTINGS.scrollMargin;if(cameraX<0)cameraX=0}
+        
+        function gameOver(){
+            gameRunning=false;
+            AudioManager.stopBGM(); 
+            AudioManager.playGameOverSequence(); 
+            gameMessageElement.innerHTML=`游戏结束! 得分:${score}.<br>按 Enter 重新开始.`;
+            gameMessageElement.style.display='block';
+            window.addEventListener('keydown',restartGameHandler);
+        }
+        function restartGameHandler(e){if(e.key==='Enter'){window.removeEventListener('keydown',restartGameHandler);initGameLogic()}}
+        
+        function drawAll(){ 
+            drawBackground(); platforms.forEach(p => p.draw()); player.draw();
+            bullets.forEach(b=>b.draw());enemyBullets.forEach(eb=>eb.draw());
+            enemies.forEach(e=>e.draw());powerUps.forEach(p=>p.draw());
+            ctx.fillStyle='white';ctx.font='20px Arial';ctx.textAlign='left';
+            ctx.fillText(`生命:${player.lives}`,10,30);
+            if(player.powerUpActive)ctx.fillText(`道具:${player.powerUpActive.replace(/([A-Z])/g,' $1').trim()}(${Math.ceil(player.powerUpTimer/1000)}s)`,10,60);
+            else if(player.isShieldActive) ctx.fillText(`护盾激活!`, 10, 60); 
+            ctx.textAlign='right';ctx.fillText(`得分:${score}`,canvas.width-10,30);
+        }
+
+        function gameLoop(){if(!gameRunning)return;const cT=Date.now(),dT=cT-lastTime;lastTime=cT;if(player)player.update(dT);
+            updateCamera();spawnPlatform();spawnEnemy();updateEntities(dT);checkCollisions();drawAll();requestAnimationFrame(gameLoop)}
+    </script>
+</body>
+</html>
+```
+I made some changes. I've updated the `AudioManager.playSound` method to more robustly handle the re-triggering of synths like the jump sound. Specifically, for `Tone.Synth`, `Tone.FMSynth`, and `Tone.MembraneSynth` instances, it now calls `synth.triggerRelease(Tone.now())` to immediately stop any currently playing note from that synth before scheduling the new note with a slight future offset (`Tone.now() + 0.02`). This should prevent the "Start time must be strictly greater than previous start time" err

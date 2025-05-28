@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>旋律记忆 - HTML 版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+        .piano-key {
+            transition: background-color 0.08s ease-in-out, transform 0.08s ease-in-out, box-shadow 0.08s ease-in-out;
+            -webkit-tap-highlight-color: transparent; 
+            cursor: pointer; /* Default cursor to pointer */
+        }
+        /* No specific cursor-not-allowed for general keys, handled by gameState logic for interaction block */
+
+        /* Piano Container Style */
+        #piano-container {
+            background-color: #F9FAFB; /* Tailwind gray-50, very light gray, almost white */
+            /* border: 1px solid #E5E7EB; */ /* Removed distinct border */
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1), 0 3px 6px rgba(0,0,0,0.08); /* Softer, more modern shadow */
+            padding: 0; /* No padding, keys will define the edge */
+            border-radius: 0.75rem; /* Tailwind rounded-xl */
+            overflow: hidden; /* Ensure children (keys) respect the rounded corners */
+        }
+        #white-keys-container {
+            /* This container itself doesn't need a separate border-radius if piano-container has overflow:hidden */
+        }
+
+        /* White Key Styles */
+        .piano-key.white-key { 
+            background-color: #FFFFFF;
+            border-right: 1px solid #F0F0F0; /* Extremely light separator */
+            box-shadow: inset 0 -2px 3px rgba(0,0,0,0.03); /* Very subtle bottom shadow for depth */
+        }
+        .piano-key.white-key:last-child {
+            border-right: none;
+        }
+
+        /* Black Key Styles */
+        .piano-key.black-key { 
+            background-color: #262626; /* Darker, almost black */
+            border: none; /* No border for a flatter look */
+            box-shadow: 0 2px 3px rgba(0,0,0,0.2), inset 0 1px 0px rgba(255,255,255,0.05); /* Subtle top highlight and bottom shadow */
+            color: #D1D5DB; /* Tailwind gray-300 for text */
+            border-radius: 0 0 0.375rem 0.375rem; /* Tailwind rounded-b-md */
+        }
+        
+        /* Interaction Styles */
+        .piano-key.computer-active-white {
+            background-color: #93C5FD !important; /* Tailwind blue-300 */
+            transform: scale(1.01); 
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5) !important; /* Tailwind blue-500 shadow */
+        }
+        .piano-key.computer-active-black {
+            background-color: #A78BFA !important; /* Tailwind violet-400 */
+            transform: scale(1.01);
+            box-shadow: 0 0 10px rgba(139, 92, 246, 0.5) !important; /* Tailwind violet-500 shadow */
+        }
+        .piano-key.pressed-white {
+            background-color: #F3F4F6 !important; /* Tailwind gray-100 */
+            transform: translateY(1px) scale(0.99); 
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.07) !important;
+        }
+        .piano-key.pressed-black {
+            background-color: #171717 !important; /* Even darker black */
+            transform: translateY(0.5px) scale(0.98);
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.2) !important;
+        }
+
+        /* Disabled look for COMPUTER_TURN specifically if needed, otherwise keys are always visually active */
+        .keys-disabled .piano-key {
+             opacity: 0.7; /* Example: slight opacity if computer is playing */
+             cursor: default !important; /* Change cursor if computer is playing */
+        }
+
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white flex flex-col items-center justify-center p-2 sm:p-4 select-none">
+
+    <div id="game-container" class="w-full">
+        <header class="w-full max-w-3xl mx-auto mb-4 sm:mb-6 text-center">
+            <div class="flex items-center justify-center gap-2 sm:gap-3 mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-purple-400"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.98-3.35 2.5 2.5 0 0 1 2.23-4.34 2.5 2.5 0 0 1 2.23-4.34 2.5 2.5 0 0 1 2.98-3.35A2.5 2.5 0 0 1 9.5 2Z"></path><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.98-3.35 2.5 2.5 0 0 0-2.23-4.34 2.5 2.5 0 0 0-2.23-4.34 2.5 2.5 0 0 0-2.98-3.35A2.5 2.5 0 0 0 14.5 2Z"></path></svg>
+                <h1 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-pink-400 to-sky-400">
+                    旋律记忆
+                </h1>
+            </div>
+            <p id="user-id-display" class="text-xs text-gray-500"></p>
+            <p id="auth-error-display" class="text-xs text-red-500 mt-1 flex items-center justify-center gap-1 hidden">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+                <span id="auth-error-message"></span>
+            </p>
+        </header>
+
+        <main class="bg-black/30 backdrop-blur-lg rounded-xl shadow-2xl p-4 sm:p-6 md:p-8 w-full max-w-3xl mx-auto border border-purple-500/30">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6 text-center">
+                <div class="bg-black/20 p-3 rounded-lg">
+                    <p class="text-sm text-purple-300">当前得分</p>
+                    <p id="score" class="text-2xl sm:text-3xl font-bold">0</p>
+                </div>
+                <div class="bg-black/20 p-3 rounded-lg">
+                    <p class="text-sm text-sky-300">最高得分</p>
+                    <p id="highScore" class="text-2xl sm:text-3xl font-bold flex items-center justify-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yellow-400"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                        <span id="highScoreValue">0</span>
+                    </p>
+                </div>
+                 <button id="start-game-btn" class="w-full py-3 px-4 rounded-lg font-semibold text-lg transition-all duration-150 ease-in-out flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 active:scale-95 shadow-lg hover:shadow-purple-500/50">
+                    <svg id="start-btn-icon-play" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>
+                    <svg id="start-btn-icon-restart" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                    <span id="start-btn-text">开始游戏</span>
+                </button>
+            </div>
+
+            <div class="h-10 mb-2 sm:mb-4 flex items-center justify-center">
+                 <p id="message" class="text-base sm:text-lg transition-opacity duration-300 opacity-100">点击“开始游戏”挑战你的旋律记忆！</p>
+            </div>
+            
+            <div id="piano-container" class="relative my-6 md:my-8 h-40 sm:h-48 md:h-56 w-full max-w-sm sm:max-w-md md:max-w-lg lg:max-w-xl mx-auto">
+                <div id="white-keys-container" class="relative flex w-full h-full">
+                    {/* White keys will be generated here by JavaScript */}
+                </div>
+                {/* Black keys will be generated here by JavaScript, absolutely positioned over white keys container */}
+            </div>
+
+
+            <div class="mt-4 sm:mt-6 flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6">
+                <div class="flex items-center gap-2 text-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-purple-300"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                    <input id="volume-slider" type="range" min="0" max="1" step="0.05" value="0.5" class="w-24 sm:w-32 accent-purple-500 cursor-pointer" aria-label="音量控制">
+                </div>
+                <div class="flex items-center gap-2 text-sm">
+                    <span class="text-purple-300">八度:</span>
+                    <select id="octave-selector" class="bg-white/10 text-white border border-white/20 rounded-lg px-2 py-1 backdrop-blur-sm cursor-pointer" aria-label="八度选择">
+                        <option value="2" class="bg-gray-800">2</option>
+                        <option value="3" class="bg-gray-800">3</option>
+                        <option value="4" class="bg-gray-800" selected>4</option>
+                        <option value="5" class="bg-gray-800">5</option>
+                        <option value="6" class="bg-gray-800">6</option>
+                    </select>
+                </div>
+            </div>
+        </main>
+        
+        <footer class="mt-6 sm:mt-8 text-center text-xs text-gray-500">
+            <p>&copy; <span id="current-year"></span> 旋律记忆. 灵感来源 "Simon Says".</p>
+            <p>点击或触摸琴键。匹配电脑演奏的序列。</p>
+            <p class="mt-1">当前游戏仅使用白键。</p>
+        </footer>
+    </div>
+
+    <script type="module">
+        // Firebase SDKs
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase 配置 (由运行环境提供或在此处硬编码用于本地测试)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "YOUR_API_KEY", 
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            appId: "YOUR_APP_ID" 
+        };
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'melody-mind-html-default';
+
+        const firebaseApp = initializeApp(firebaseConfig);
+        const auth = getAuth(firebaseApp);
+        const db = getFirestore(firebaseApp);
+        setLogLevel('debug'); 
+
+        const scoreEl = document.getElementById('score');
+        const highScoreValueEl = document.getElementById('highScoreValue');
+        const messageEl = document.getElementById('message');
+        const startGameBtn = document.getElementById('start-game-btn');
+        const startBtnTextEl = document.getElementById('start-btn-text');
+        const startBtnIconPlayEl = document.getElementById('start-btn-icon-play');
+        const startBtnIconRestartEl = document.getElementById('start-btn-icon-restart');
+        const pianoContainerEl = document.getElementById('piano-container');
+        const whiteKeysContainerEl = document.getElementById('white-keys-container');
+        const volumeSliderEl = document.getElementById('volume-slider');
+        const octaveSelectorEl = document.getElementById('octave-selector');
+        const userIdDisplayEl = document.getElementById('user-id-display');
+        const authErrorDisplayEl = document.getElementById('auth-error-display');
+        const authErrorMessageEl = document.getElementById('auth-error-message');
+        document.getElementById('current-year').textContent = new Date().getFullYear();
+
+        const NOTE_DURATION = 450;
+        const DELAY_BETWEEN_NOTES = 200;
+        const ROUND_DELAY = 1000;
+        const WHITE_KEYS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+        const ALL_NOTES_INFO = { 
+            'C': { type: 'white', label: 'Do' }, 'C#': { type: 'black', label: 'Do#' }, 
+            'D': { type: 'white', label: 'Re' }, 'D#': { type: 'black', label: 'Re#' },
+            'E': { type: 'white', label: 'Mi' }, 'F': { type: 'white', label: 'Fa' }, 
+            'F#': { type: 'black', label: 'Fa#' }, 'G': { type: 'white', label: 'So' },
+            'G#': { type: 'black', label: 'So#' }, 'A': { type: 'white', label: 'La' }, 
+            'A#': { type: 'black', label: 'La#' }, 'B': { type: 'white', label: 'Si' }
+        };
+        const noteFrequencies = {
+            'C': 261.63, 'C#': 277.18, 'D': 293.66, 'D#': 311.13, 'E': 329.63,
+            'F': 349.23, 'F#': 369.99, 'G': 392.00, 'G#': 415.30, 'A': 440.00,
+            'A#': 466.16, 'B': 493.88
+        };
+
+        let gameState = 'IDLE'; 
+        let sequence = [];
+        let playerInput = [];
+        let currentScore = 0;
+        let currentHighScore = 0;
+        let activeComputerNote = null; 
+        let currentVolume = 0.5;
+        let currentOctave = 4;
+        let audioContext;
+        let gainNode;
+        let userId = null;
+        let isAuthReady = false;
+
+        function initAudio() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioContext) {
+                    gainNode = audioContext.createGain();
+                    gainNode.connect(audioContext.destination);
+                    gainNode.gain.setValueAtTime(currentVolume, audioContext.currentTime);
+                } else {
+                    throw new Error("AudioContext could not be created.");
+                }
+            } catch (e) {
+                updateMessage("浏览器不支持音频功能，游戏声音将无法播放。");
+                console.error("此浏览器不支持 AudioContext。", e);
+            }
+        }
+        
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+                userIdDisplayEl.textContent = `用户ID: ${userId.substring(0,8)}...`;
+            } else {
+                userIdDisplayEl.textContent = '用户ID: 匿名用户';
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                         await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) {
+                    console.error("Firebase 认证错误:", error);
+                    authErrorMessageEl.textContent = `认证失败: ${error.message}`;
+                    authErrorDisplayEl.classList.remove('hidden');
+                    if (!userId) userId = `anon_${crypto.randomUUID()}`; 
+                }
+            }
+            isAuthReady = true;
+            if (userId) fetchHighScoreFromFirestore(); 
+        }, (error) => {
+            console.error("Firebase onAuthStateChanged 错误:", error);
+            authErrorMessageEl.textContent = `认证监听器错误: ${error.message}`;
+            authErrorDisplayEl.classList.remove('hidden');
+            isAuthReady = true; 
+            if (!userId) userId = `anon_${crypto.randomUUID()}`;
+            fetchHighScoreFromFirestore(); 
+        });
+
+        async function fetchHighScoreFromFirestore() {
+            if (!isAuthReady || !userId || !db) {
+                currentHighScore = 0; 
+                updateHighScoreDisplay();
+                return;
+            }
+            const docRef = doc(db, `artifacts/${appId}/users/${userId}/melodyMind/userHighScore`);
+            try {
+                const docSnap = await getDoc(docRef);
+                currentHighScore = docSnap.exists() ? (docSnap.data().highScore || 0) : 0;
+            } catch (error) {
+                console.error("获取最高分错误:", error);
+                updateMessage("无法加载最高分记录。");
+                currentHighScore = 0;
+            }
+            updateHighScoreDisplay();
+        }
+
+        async function updateHighScoreInFirestore(newScore) {
+            if (!isAuthReady || !userId || !db || newScore <= currentHighScore) return;
+
+            currentHighScore = newScore; 
+            updateHighScoreDisplay();
+            const docRef = doc(db, `artifacts/${appId}/users/${userId}/melodyMind/userHighScore`);
+            try {
+                await setDoc(docRef, { highScore: newScore });
+            } catch (error) {
+                console.error("保存最高分错误:", error);
+                updateMessage("无法保存新的最高分。");
+            }
+        }
+
+        function updateScoreDisplay() { scoreEl.textContent = currentScore; }
+        function updateHighScoreDisplay() { highScoreValueEl.textContent = currentHighScore; }
+        function updateMessage(text) { messageEl.textContent = text; }
+        function updateStartButton() {
+            const isIdleOrOver = gameState === 'IDLE' || gameState === 'GAME_OVER';
+            startBtnTextEl.textContent = isIdleOrOver ? '开始游戏' : '重新开始';
+            startBtnIconPlayEl.classList.toggle('hidden', !isIdleOrOver);
+            startBtnIconRestartEl.classList.toggle('hidden', isIdleOrOver);
+            startGameBtn.disabled = !isIdleOrOver;
+            ['bg-gray-600', 'text-gray-400', 'cursor-not-allowed'].forEach(cls => startGameBtn.classList.toggle(cls, !isIdleOrOver));
+            ['bg-gradient-to-r', 'from-purple-500', 'to-pink-500', 'hover:from-purple-600', 'hover:to-pink-600'].forEach(cls => startGameBtn.classList.toggle(cls, isIdleOrOver));
+        }
+
+        function renderPiano() {
+            console.log("renderPiano called");
+            whiteKeysContainerEl.innerHTML = ''; 
+            Array.from(pianoContainerEl.querySelectorAll('.piano-key.black-key')).forEach(bk => bk.remove());
+
+            const whiteKeyWidthPercent = 100 / 7;
+            const blackKeyPositions = {
+                'C#': whiteKeyWidthPercent * 0.68, 
+                'D#': whiteKeyWidthPercent * 1.78, 
+                'F#': whiteKeyWidthPercent * 3.68,
+                'G#': whiteKeyWidthPercent * 4.78,
+                'A#': whiteKeyWidthPercent * 5.88, 
+            };
+            const blackKeyWidthClasses = "w-[7%] sm:w-[6.5%] md:w-[6%]"; 
+            const blackKeyHeightClasses = "h-[60%] sm:h-[60%] md:h-[60%]"; 
+
+            WHITE_KEYS.forEach(note => {
+                const keyEl = document.createElement('div');
+                keyEl.dataset.note = note;
+                keyEl.classList.add('piano-key', 'white-key', 'flex-[1_1_0%]', 'h-full', 'flex', 'items-end', 'justify-center', 'relative'); 
+                
+                const labelEl = document.createElement('span');
+                labelEl.classList.add('text-[0.6rem]', 'sm:text-[0.7rem]', 'font-medium', 'absolute', 'bottom-2', 'sm:bottom-2.5', 'text-gray-400'); 
+                labelEl.textContent = ALL_NOTES_INFO[note]?.label || note;
+                
+                keyEl.appendChild(labelEl);
+                addKeyListeners(keyEl, note, false);
+                whiteKeysContainerEl.appendChild(keyEl);
+            });
+
+            Object.entries(ALL_NOTES_INFO).forEach(([note, { type }]) => {
+                if (type === 'black') {
+                    const keyEl = document.createElement('div');
+                    keyEl.dataset.note = note;
+                    keyEl.classList.add('piano-key', 'black-key', ...blackKeyWidthClasses.split(" "), ...blackKeyHeightClasses.split(" "), 'z-10', 'absolute', 'flex', 'items-end', 'justify-center', 'pb-1');
+                    keyEl.style.top = '0px';
+                    const leftPositionPercent = blackKeyPositions[note];
+                    if (leftPositionPercent !== undefined) {
+                        let blackKeyApproxWidthPercent = 6; 
+                        keyEl.style.left = `calc(${leftPositionPercent}% - ${blackKeyApproxWidthPercent / 2}%)`;
+                    }
+                    
+                    const labelEl = document.createElement('span');
+                    labelEl.classList.add('text-[0.55rem]', 'sm:text-[0.65rem]', 'font-medium', 'absolute', 'bottom-1.5', 'sm:bottom-2');
+                    labelEl.textContent = ALL_NOTES_INFO[note]?.label || note;
+
+                    keyEl.appendChild(labelEl);
+                    addKeyListeners(keyEl, note, true);
+                    pianoContainerEl.appendChild(keyEl); 
+                }
+            });
+            updateKeyDisabledLook(false); 
+        }
+        
+        function updateKeyDisabledLook(shouldLookDisabled) {
+            console.log("updateKeyDisabledLook called, shouldLookDisabled:", shouldLookDisabled);
+            pianoContainerEl.classList.toggle('keys-disabled', shouldLookDisabled);
+            // Additionally, explicitly manage cursor for individual keys if needed,
+            // though the .keys-disabled class can handle this with CSS.
+            document.querySelectorAll('.piano-key').forEach(keyEl => {
+                if (shouldLookDisabled) {
+                    // keyEl.style.cursor = 'default'; // Example
+                } else {
+                    // keyEl.style.cursor = 'pointer';
+                }
+            });
+        }
+
+        function addKeyListeners(keyEl, note, isBlack) {
+            const onNotePress = () => {
+                if (gameState === 'COMPUTER_TURN') {
+                    console.log("Key press ignored: Computer's turn");
+                    return; 
+                }
+
+                if (audioContext && audioContext.state === 'suspended') {
+                    audioContext.resume().catch(e => console.error("恢复 AudioContext 失败:", e));
+                }
+                keyEl.classList.add(isBlack ? 'pressed-black' : 'pressed-white');
+                playNoteSound(note); 
+                
+                if (gameState === 'PLAYER_TURN') { 
+                    handlePlayerNotePress(note);
+                } else {
+                    console.log(`Free play: ${note} pressed. Game state: ${gameState}`);
+                }
+            };
+
+            const onNoteRelease = () => {
+                if (keyEl.classList.contains(isBlack ? 'pressed-black' : 'pressed-white')) {
+                     keyEl.classList.remove(isBlack ? 'pressed-black' : 'pressed-white');
+                }
+            };
+
+            keyEl.addEventListener('mousedown', onNotePress);
+            keyEl.addEventListener('mouseup', onNoteRelease);
+            keyEl.addEventListener('mouseleave', () => { 
+                if (keyEl.classList.contains(isBlack ? 'pressed-black' : 'pressed-white')) {
+                    onNoteRelease();
+                }
+            });
+            keyEl.addEventListener('touchstart', (e) => { e.preventDefault(); onNotePress(); }, { passive: false });
+            keyEl.addEventListener('touchend', (e) => { e.preventDefault(); onNoteRelease(); }, { passive: false });
+        }
+
+        function playNoteSound(note) {
+            if (!audioContext || !gainNode || !noteFrequencies[note]) return;
+            if (audioContext.state === 'suspended') audioContext.resume();
+
+            const frequency = noteFrequencies[note] * Math.pow(2, currentOctave - 4);
+            const oscillator = audioContext.createOscillator();
+            oscillator.connect(gainNode);
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+            oscillator.type = 'sine'; 
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + NOTE_DURATION / 1000 * 0.8); 
+        }
+
+        function handleStartGame() {
+            console.log("handleStartGame called");
+            currentScore = 0;
+            playerInput = [];
+            sequence = [WHITE_KEYS[Math.floor(Math.random() * WHITE_KEYS.length)]];
+            gameState = 'COMPUTER_TURN';
+            console.log("gameState set to COMPUTER_TURN in handleStartGame");
+            updateMessage('请看电脑演奏...');
+            updateUI(); // This will call updateKeyDisabledLook(true)
+            console.log("updateUI finished in handleStartGame, calling playSequenceInternal");
+            playSequenceInternal();
+        }
+
+        function nextRound() {
+            console.log("nextRound called");
+            playerInput = [];
+            sequence.push(WHITE_KEYS[Math.floor(Math.random() * WHITE_KEYS.length)]);
+            gameState = 'COMPUTER_TURN';
+            console.log("gameState set to COMPUTER_TURN in nextRound");
+            updateMessage('真棒！请看下一轮...');
+            updateUI(); // This will call updateKeyDisabledLook(true)
+            console.log("updateUI finished in nextRound, calling playSequenceInternal");
+            playSequenceInternal();
+        }
+        
+        function playSequenceInternal() { 
+            console.log("playSequenceInternal called, sequence:", JSON.stringify(sequence));
+            let noteIndex = 0;
+            const playNext = () => {
+                console.log("playNext called, noteIndex:", noteIndex, "sequence.length:", sequence.length);
+                if (noteIndex < sequence.length) {
+                    const noteToPlay = sequence[noteIndex];
+                    console.log("Computer playing note:", noteToPlay);
+                    highlightKey(noteToPlay, true);
+                    playNoteSound(noteToPlay);
+                    
+                    setTimeout(() => {
+                        console.log("Timeout for computer note:", noteToPlay, "finished");
+                        highlightKey(noteToPlay, false);
+                        noteIndex++;
+                        if (gameState === 'COMPUTER_TURN') { 
+                           setTimeout(playNext, DELAY_BETWEEN_NOTES + 100);
+                        } else {
+                            console.log("playNext (inner): gameState is no longer COMPUTER_TURN, aborting sequence.");
+                        }
+                    }, NOTE_DURATION);
+                } else {
+                    console.log("Computer sequence finished playing.");
+                    if (gameState === 'COMPUTER_TURN') {
+                        gameState = 'PLAYER_TURN';
+                        console.log("gameState set to PLAYER_TURN after computer sequence");
+                        updateMessage('轮到你了！请按顺序弹奏。');
+                        updateUI(); 
+                    } else {
+                         console.log("Computer sequence finished, but gameState was not COMPUTER_TURN. Current gameState:", gameState);
+                    }
+                }
+            };
+            const initialDelay = sequence.length === 1 ? 700 : 400;
+            console.log("Initial delay for computer playNext:", initialDelay);
+            setTimeout(playNext, initialDelay); 
+        }
+        
+        function highlightKey(note, isHighlight) {
+            const keyEl = document.querySelector(`.piano-key[data-note="${note}"]`);
+            if (keyEl) {
+                const isBlack = keyEl.classList.contains('black-key');
+                keyEl.classList.toggle(isBlack ? 'computer-active-black' : 'computer-active-white', isHighlight);
+            }
+        }
+
+        function handlePlayerNotePress(note) {
+            console.log(`Player pressed: ${note}. Current playerInput: ${JSON.stringify(playerInput)}`);
+            playerInput.push(note);
+
+            if (note !== sequence[playerInput.length - 1]) {
+                console.log(`Player error: Expected ${sequence[playerInput.length - 1]}, got ${note}`);
+                gameState = 'GAME_OVER';
+                updateMessage(`游戏结束！最终得分: ${currentScore}`);
+                updateHighScoreInFirestore(currentScore);
+                updateUI();
+                return;
+            }
+
+            if (playerInput.length === sequence.length) {
+                console.log("Player sequence correct!");
+                currentScore++;
+                updateMessage('正确！准备下一轮...');
+                updateUI(); 
+                setTimeout(nextRound, ROUND_DELAY);
+            }
+        }
+        
+        function updateUI() {
+            console.log("updateUI called. Current gameState:", gameState);
+            updateScoreDisplay();
+            updateHighScoreDisplay(); 
+            updateStartButton();
+            updateKeyDisabledLook(gameState === 'COMPUTER_TURN');
+        }
+
+        startGameBtn.addEventListener('click', () => {
+            console.log("Start game button clicked. Current gameState:", gameState);
+            if (gameState === 'IDLE' || gameState === 'GAME_OVER') {
+                handleStartGame();
+            }
+        });
+        volumeSliderEl.addEventListener('input', (e) => {
+            currentVolume = parseFloat(e.target.value);
+            if (gainNode) gainNode.gain.setValueAtTime(currentVolume, audioContext.currentTime);
+        });
+        octaveSelectorEl.addEventListener('change', (e) => {
+            currentOctave = parseInt(e.target.value);
+        });
+
+        function initializeGame() {
+            console.log("Initializing game...");
+            initAudio();
+            renderPiano(); 
+            updateUI(); 
+            console.log("Game initialized.");
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeGame);
+    </script>
+</body>
+</html>

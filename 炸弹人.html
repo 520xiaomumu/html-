@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>炸弹人小游戏</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        .game-container {
+            display: grid;
+            border: 2px solid #333;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            background-color: #c0c0c0; /* 游戏区域背景色 */
+        }
+        .cell {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            border: 1px solid #d1d1d1; /* 单元格边框颜色，浅一点 */
+            box-sizing: border-box;
+        }
+        .player { background-color: #90ee90; border-radius: 50%; content: '😀'; }
+        .wall { background-color: #555; background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23777777' fill-opacity='1' fill-rule='evenodd'%3E%3Cpath d='M0 0h10v10H0V0zm10 10h10v10H10V10zm10-10h10v10H20V0zm10 10h10v10H30V10zm-10-10h10v10H20V0zm0 20h10v10H20V20zm10-10h10v10H30V10zm0 20h10v10H30V20zm-10-10h10v10H20V10zm-10 0h10v10H10V10zm0 10h10v10H10V20zm-10-10h10v10H0V10zm0 10h10v10H0V20zm10-20h10v10H10V0zm20 0h10v10H30V0zm-10 20h10v10H20V20zm-20 0h10v10H0V20z'/%3E%3C/g%3E%3C/svg%3E"); } /* 深灰色墙壁 */
+        .brick { background-color: #deb887; background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23a0522d' fill-opacity='0.6' fill-rule='evenodd'%3E%3Cpath d='M0 0h20v10H0V0zm20 0h20v10H20V0zM0 10h10v10H0V10zm10 10h20v10H10V20zm20-10h10v10H30V10zM0 20h20v10H0V20zm20 10h20v10H20V30zM0 30h10v10H0V30z'/%3E%3C/g%3E%3C/svg%3E");} /* 砖块 */
+        .bomb { background-color: #ff4500; border-radius: 50%; animation: pulse 1s infinite; content: '💣'; }
+        .explosion { background-color: #ffcc00; opacity: 0.8; content: '💥'; }
+        .powerup-bomb { background-color: #add8e6; content: '➕💣'; border-radius: 4px;} /* 增加炸弹道具 */
+        .powerup-range { background-color: #98fb98; content: '➕🔥'; border-radius: 4px;} /* 增加范围道具 */
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .controls, .info-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .controls button {
+            background-color: #4CAF50; /* Green */
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+        .controls button:hover {
+            background-color: #45a049;
+        }
+        .info-panel p {
+            margin: 5px 0;
+        }
+        .modal {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .modal-content h2 {
+            margin-top: 0;
+            color: #333;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <h1 class="text-3xl font-bold mb-6 text-gray-700">炸弹人小游戏</h1>
+
+    <div id="gameContainer" class="game-container shadow-lg rounded-md"></div>
+
+    <div class="info-panel w-full max-w-md mt-4 p-4 bg-white rounded-lg shadow">
+        <h2 class="text-xl font-semibold mb-2">游戏信息</h2>
+        <p>剩余敌人: <span id="enemiesLeft" class="font-bold">0</span></p>
+        <p>炸弹数量: <span id="bombCount" class="font-bold">1</span>/<span id="maxBombs" class="font-bold">1</span></p>
+        <p>炸弹威力: <span id="bombRange" class="font-bold">1</span></p>
+        <p class="mt-2 text-sm text-gray-600">使用方向键移动，空格键放置炸弹。</p>
+    </div>
+    
+    <div class="controls mt-4">
+        <button id="restartButton" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">重新开始</button>
+    </div>
+
+    <div id="messageModal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="modalTitle" class="text-2xl font-bold mb-4">游戏结束</h2>
+            <p id="modalMessage" class="text-lg mb-6">你赢了！</p>
+            <button id="modalCloseButton" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-6 rounded">确定</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 游戏配置 ---
+        const GRID_ROWS = 13; // 行数 (奇数)
+        const GRID_COLS = 15; // 列数 (奇数)
+        const CELL_SIZE = 40; // 单元格大小 (px)
+        const PLAYER_START_POS = { r: 1, c: 1 }; // 玩家初始位置
+
+        const Tile = {
+            EMPTY: 0,
+            WALL: 1,    // 不可破坏的墙
+            BRICK: 2,   // 可破坏的砖块
+            BOMB: 3,
+            EXPLOSION: 4,
+            POWERUP_BOMB: 5, // 增加炸弹数量道具
+            POWERUP_RANGE: 6, // 增加炸弹威力道具
+        };
+
+        const POWERUP_CHANCE = 0.3; // 砖块被炸后出现道具的概率
+
+        // --- 游戏状态 ---
+        let grid = [];
+        let player = { ...PLAYER_START_POS, bombsPlaced: 0, maxBombs: 1, bombRange: 1 };
+        let enemies = []; // { r, c, id }
+        let bombs = []; // { r, c, timer, range, owner, timeoutId } // Added timeoutId for potential连锁爆炸
+        let gameLoopInterval;
+        let gameActive = true;
+        let enemyCounter = 0; // 用于生成唯一的敌人ID
+
+        // --- DOM元素 ---
+        const gameContainer = document.getElementById('gameContainer');
+        const enemiesLeftEl = document.getElementById('enemiesLeft');
+        const bombCountEl = document.getElementById('bombCount');
+        const maxBombsEl = document.getElementById('maxBombs');
+        const bombRangeEl = document.getElementById('bombRange');
+        const restartButton = document.getElementById('restartButton');
+        
+        const messageModal = document.getElementById('messageModal');
+        const modalTitleEl = document.getElementById('modalTitle');
+        const modalMessageEl = document.getElementById('modalMessage');
+        const modalCloseButton = document.getElementById('modalCloseButton');
+
+        // --- 初始化游戏 ---
+        function initGame() {
+            gameActive = true;
+            player = { ...PLAYER_START_POS, bombsPlaced: 0, maxBombs: 1, bombRange: 1 };
+            enemies = [];
+            // Clear any existing bomb timeouts
+            bombs.forEach(bomb => clearTimeout(bomb.timeoutId));
+            bombs = [];
+            enemyCounter = 0;
+
+            generateGrid();
+            placePlayer();
+            placeEnemies(3); // 放置3个敌人
+            updateInfoPanel();
+            renderGrid();
+            if (gameLoopInterval) clearInterval(gameLoopInterval);
+            gameLoopInterval = setInterval(gameLoop, 200); // 游戏主循环 (敌人移动速度)
+            hideModal();
+        }
+
+        // --- 生成游戏地图 ---
+        function generateGrid() {
+            grid = [];
+            for (let r = 0; r < GRID_ROWS; r++) {
+                grid[r] = [];
+                for (let c = 0; c < GRID_COLS; c++) {
+                    if (r === 0 || r === GRID_ROWS - 1 || c === 0 || c === GRID_COLS - 1 || (r % 2 === 0 && c % 2 === 0)) {
+                        grid[r][c] = Tile.WALL; // 边界和固定墙体
+                    } else {
+                        // 避免在玩家出生点和附近生成砖块
+                        if ((r === PLAYER_START_POS.r && c === PLAYER_START_POS.c) ||
+                            (r === PLAYER_START_POS.r + 1 && c === PLAYER_START_POS.c) ||
+                            (r === PLAYER_START_POS.r && c === PLAYER_START_POS.c + 1) ||
+                            (r === PLAYER_START_POS.r -1 && c === PLAYER_START_POS.c && PLAYER_START_POS.r > 1) ||
+                            (r === PLAYER_START_POS.r && c === PLAYER_START_POS.c -1 && PLAYER_START_POS.c > 1)
+                        ) {
+                           grid[r][c] = Tile.EMPTY;
+                        } else {
+                           grid[r][c] = Math.random() < 0.7 ? Tile.BRICK : Tile.EMPTY; // 70%概率生成砖块
+                        }
+                    }
+                }
+            }
+            // 确保玩家出生点是空的
+            grid[PLAYER_START_POS.r][PLAYER_START_POS.c] = Tile.EMPTY;
+            if (PLAYER_START_POS.r + 1 < GRID_ROWS) grid[PLAYER_START_POS.r+1][PLAYER_START_POS.c] = Tile.EMPTY;
+            if (PLAYER_START_POS.c + 1 < GRID_COLS) grid[PLAYER_START_POS.r][PLAYER_START_POS.c+1] = Tile.EMPTY;
+
+        }
+
+        // --- 放置玩家 ---
+        function placePlayer() {
+            // 玩家位置已在player对象中
+        }
+
+        // --- 放置敌人 ---
+        function placeEnemies(count) {
+            for (let i = 0; i < count; i++) {
+                let r, c;
+                do {
+                    r = Math.floor(Math.random() * (GRID_ROWS - 2)) + 1; // Avoid border walls
+                    c = Math.floor(Math.random() * (GRID_COLS - 2)) + 1; // Avoid border walls
+                } while (grid[r][c] !== Tile.EMPTY || // Must be empty
+                         (r === player.r && c === player.c) || // Not on player
+                         (Math.abs(r - player.r) < 3 && Math.abs(c - player.c) < 3) || // Not too close to player start
+                         enemies.some(e => e.r === r && e.c === c) // Not on another enemy
+                        ); 
+                enemies.push({ r, c, id: enemyCounter++ });
+            }
+        }
+
+
+        // --- 渲染游戏界面 ---
+        function renderGrid() {
+            // Optimization: If game is over and no bombs are ticking, no need to re-render constantly
+            if (!gameActive && bombs.length === 0 && !grid.flat().includes(Tile.EXPLOSION)) return; 
+
+            gameContainer.innerHTML = ''; // Clear previous render
+            gameContainer.style.gridTemplateRows = `repeat(${GRID_ROWS}, ${CELL_SIZE}px)`;
+            gameContainer.style.gridTemplateColumns = `repeat(${GRID_COLS}, ${CELL_SIZE}px)`;
+
+            for (let r = 0; r < GRID_ROWS; r++) {
+                for (let c = 0; c < GRID_COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    // cell.dataset.r = r; // Not strictly needed for rendering if not used by CSS/JS
+                    // cell.dataset.c = c;
+
+                    let content = '';
+                    let tileType = grid[r][c];
+                    
+                    // Check if a bomb is at this cell for rendering purposes
+                    const bombOnCell = bombs.find(b => b.r === r && b.c === c);
+                    if (bombOnCell) {
+                        tileType = Tile.BOMB; // Override tile type for rendering if bomb is present
+                    }
+
+                    switch (tileType) {
+                        case Tile.WALL: cell.classList.add('wall'); break;
+                        case Tile.BRICK: cell.classList.add('brick'); content = '🧱'; break;
+                        case Tile.BOMB: cell.classList.add('bomb'); content = '💣'; break;
+                        case Tile.EXPLOSION: cell.classList.add('explosion'); content = '💥'; break;
+                        case Tile.POWERUP_BOMB: cell.classList.add('powerup-bomb'); content = '➕💣'; break;
+                        case Tile.POWERUP_RANGE: cell.classList.add('powerup-range'); content = '➕🔥'; break;
+                        case Tile.EMPTY:
+                        default:
+                            // cell.classList.add('empty'); // No specific class needed for empty, default cell style applies
+                            break;
+                    }
+                    
+                    // Render player if active and at this cell
+                    if (gameActive && player.r === r && player.c === c) {
+                        content = '😀'; // Player emoji
+                        // cell.classList.add('player'); // Player class adds background, emoji is enough
+                    }
+
+                    // Render enemies if at this cell
+                    enemies.forEach(enemy => {
+                        if (enemy.r === r && enemy.c === c) {
+                            content = '👻'; // Enemy emoji
+                            // cell.classList.add('enemy'); // Emoji is enough
+                        }
+                    });
+                    cell.innerHTML = content; // Use innerHTML to render emojis
+                    gameContainer.appendChild(cell);
+                }
+            }
+        }
+
+        // --- 更新信息面板 ---
+        function updateInfoPanel() {
+            enemiesLeftEl.textContent = enemies.length;
+            bombCountEl.textContent = player.maxBombs - player.bombsPlaced;
+            maxBombsEl.textContent = player.maxBombs;
+            bombRangeEl.textContent = player.bombRange;
+        }
+        
+        // --- 玩家移动 ---
+        function movePlayer(dr, dc) {
+            if (!gameActive) return;
+
+            const newR = player.r + dr;
+            const newC = player.c + dc;
+
+            if (newR >= 0 && newR < GRID_ROWS && newC >= 0 && newC < GRID_COLS) { // Check bounds
+                const targetCellType = grid[newR][newC];
+                // Check if player is trying to move into a cell currently occupied by a bomb they *just* placed
+                const isBombAtTarget = bombs.some(b => b.r === newR && b.c === newC);
+                const bombJustPlacedExemption = isBombAtTarget && bombs.find(b => b.r === newR && b.c === newC)?.justPlaced;
+
+                if (targetCellType !== Tile.WALL && targetCellType !== Tile.BRICK && (!isBombAtTarget || bombJustPlacedExemption)) {
+                    player.r = newR;
+                    player.c = newC;
+                    checkPowerupPickup(newR, newC); // Check for power-ups at new location
+                    checkEnemyCollision(); // Check for collision with enemies
+                    renderGrid(); // Re-render after move
+                }
+            }
+        }
+
+        // --- 拾取道具 ---
+        function checkPowerupPickup(r, c) {
+            if (grid[r][c] === Tile.POWERUP_BOMB) {
+                player.maxBombs++;
+                grid[r][c] = Tile.EMPTY; // Remove power-up from grid
+                updateInfoPanel();
+            } else if (grid[r][c] === Tile.POWERUP_RANGE) {
+                player.bombRange++;
+                grid[r][c] = Tile.EMPTY; // Remove power-up from grid
+                updateInfoPanel();
+            }
+        }
+        
+        // --- 放置炸弹 ---
+        function placeBomb() {
+            if (!gameActive || player.bombsPlaced >= player.maxBombs) return;
+
+            const bombR = player.r;
+            const bombC = player.c;
+
+            // Prevent placing a bomb on an existing bomb
+            if (bombs.some(b => b.r === bombR && b.c === bombC)) return;
+
+            player.bombsPlaced++;
+            const bomb = { 
+                r: bombR, 
+                c: bombC, 
+                timer: 3000, // 3 seconds
+                range: player.bombRange, 
+                owner: player, 
+                justPlaced: true // Flag to allow player to walk off
+            };
+            bombs.push(bomb);
+            updateInfoPanel();
+            renderGrid(); // Show bomb immediately
+
+            // Player can walk off the bomb for a short period
+            setTimeout(() => {
+                const currentBomb = bombs.find(b => b.r === bombR && b.c === bombC && b.timer === 3000); // ensure it's the same bomb
+                if (currentBomb) currentBomb.justPlaced = false;
+            }, 250); // Shorter time, enough to step off
+
+            // Set timeout for explosion
+            bomb.timeoutId = setTimeout(() => {
+                explodeBomb(bomb);
+            }, bomb.timer);
+        }
+
+        // --- 炸弹爆炸 ---
+        function explodeBomb(bombToExplode) {
+            if (!bombToExplode || !bombs.includes(bombToExplode)) return; // Bomb might have been chain-exploded
+
+            // Remove bomb from active list
+            bombs = bombs.filter(b => b !== bombToExplode);
+            if (bombToExplode.owner) { 
+                 bombToExplode.owner.bombsPlaced--;
+            }
+            updateInfoPanel();
+
+            const explosionCoords = [{ r: bombToExplode.r, c: bombToExplode.c }]; // Explosion center
+
+            const directions = [ { dr: -1, dc: 0 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }, { dr: 0, dc: 1 }];
+
+            for (const dir of directions) {
+                for (let i = 1; i <= bombToExplode.range; i++) {
+                    const r = bombToExplode.r + dir.dr * i;
+                    const c = bombToExplode.c + dir.dc * i;
+
+                    if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) break; // Out of bounds
+
+                    const cellType = grid[r][c];
+                    if (cellType === Tile.WALL) break; // Explosion stops at indestructible walls
+
+                    explosionCoords.push({ r, c });
+
+                    if (cellType === Tile.BRICK) break; // Explosion stops after hitting a brick (but destroys it)
+                }
+            }
+            
+            const affectedCellsForRender = []; // Store original types for later restoration
+            explosionCoords.forEach(coord => {
+                affectedCellsForRender.push({...coord, originalType: grid[coord.r][coord.c]});
+                grid[coord.r][coord.c] = Tile.EXPLOSION; // Mark cell as explosion for rendering
+
+                // Check player collision
+                if (gameActive && player.r === coord.r && player.c === coord.c) {
+                    gameOver("你被炸弹炸到了！");
+                }
+
+                // Check enemy collision
+                enemies = enemies.filter(enemy => {
+                    if (enemy.r === coord.r && enemy.c === coord.c) {
+                        return false; // Enemy killed
+                    }
+                    return true;
+                });
+
+                // Check for chain reactions with other bombs
+                const otherBomb = bombs.find(b => b.r === coord.r && b.c === coord.c);
+                if (otherBomb && otherBomb !== bombToExplode) {
+                    clearTimeout(otherBomb.timeoutId); // Clear its original timer
+                    explodeBomb(otherBomb); // Trigger immediate explosion
+                }
+
+                // Handle brick destruction and power-up generation
+                const originalCellData = affectedCellsForRender.find(ac => ac.r === coord.r && ac.c === coord.c);
+                if (originalCellData && originalCellData.originalType === Tile.BRICK) {
+                     grid[coord.r][coord.c] = Tile.EMPTY; // Brick becomes empty
+                     if (Math.random() < POWERUP_CHANCE) { // Chance to spawn power-up
+                        grid[coord.r][coord.c] = Math.random() < 0.5 ? Tile.POWERUP_BOMB : Tile.POWERUP_RANGE;
+                     }
+                }
+            });
+
+            renderGrid(); 
+            updateInfoPanel();
+
+            // Clear explosion tiles after a delay
+            setTimeout(() => {
+                explosionCoords.forEach(coord => {
+                    if (grid[coord.r][coord.c] === Tile.EXPLOSION) {
+                        // If it was a brick, it's already handled (empty or powerup)
+                        // If it was empty or a powerup that got exploded, revert to empty
+                        const originalCellData = affectedCellsForRender.find(ac => ac.r === coord.r && ac.c === coord.c);
+                        if (originalCellData && originalCellData.originalType !== Tile.BRICK) {
+                           grid[coord.r][coord.c] = Tile.EMPTY;
+                        }
+                         // If it was a powerup that got hit by explosion, it should become empty
+                        else if (originalCellData && (originalCellData.originalType === Tile.POWERUP_BOMB || originalCellData.originalType === Tile.POWERUP_RANGE)) {
+                            grid[coord.r][coord.c] = Tile.EMPTY;
+                        }
+                    }
+                });
+                renderGrid();
+                if (gameActive && enemies.length === 0) { // Check for win condition
+                    gameOver("恭喜你，消灭了所有敌人！");
+                }
+            }, 300); // Explosion display duration (shorter for snappier feel)
+        }
+        
+        // --- 敌人逻辑 ---
+        function moveEnemies() {
+            if (!gameActive) return;
+
+            enemies.forEach(enemy => {
+                const directions = [ {dr: -1, dc: 0}, {dr: 1, dc: 0}, {dr: 0, dc: -1}, {dr: 0, dc: 1}, {dr: 0, dc: 0} ]; // Added stay still option
+                const validMoves = [];
+
+                for (const dir of directions) {
+                    const newR = enemy.r + dir.dr;
+                    const newC = enemy.c + dir.dc;
+                    if (newR >= 0 && newR < GRID_ROWS && newC >= 0 && newC < GRID_COLS &&
+                        grid[newR][newC] !== Tile.WALL && grid[newR][newC] !== Tile.BRICK &&
+                        !bombs.some(b => b.r === newR && b.c === newC) && // Don't walk into bombs
+                        !(newR === player.r && newC === player.c) // Basic check to not walk directly into player if player is there
+                        ) {
+                        validMoves.push(dir);
+                    }
+                }
+                // If only move is to stay still, or no valid moves (should not happen if map is open)
+                if (validMoves.length === 0 && grid[enemy.r][enemy.c] === Tile.EMPTY) {
+                     validMoves.push({dr: 0, dc: 0}); // Ensure it can at least stay still
+                }
+
+
+                if (validMoves.length > 0) {
+                    const move = validMoves[Math.floor(Math.random() * validMoves.length)];
+                    enemy.r += move.dr;
+                    enemy.c += move.dc;
+                }
+                checkEnemyCollision(); // Check collision after enemy moves
+            });
+        }
+
+        // --- 检查玩家与敌人碰撞 ---
+        function checkEnemyCollision() {
+            if (!gameActive) return;
+            enemies.forEach(enemy => {
+                if (player.r === enemy.r && player.c === enemy.c) {
+                    gameOver("你碰到了敌人！");
+                }
+            });
+        }
+
+        // --- 游戏主循环 ---
+        function gameLoop() {
+            if (!gameActive) {
+                clearInterval(gameLoopInterval);
+                return;
+            }
+            moveEnemies();
+            renderGrid(); 
+            updateInfoPanel(); 
+        }
+
+        // --- 游戏结束 ---
+        function gameOver(message) {
+            if (!gameActive) return; 
+            gameActive = false;
+            clearInterval(gameLoopInterval);
+            console.log("游戏结束:", message);
+            showModal("游戏结束", message);
+        }
+
+        // --- 显示模态框 ---
+        function showModal(title, message) {
+            modalTitleEl.textContent = title;
+            modalMessageEl.textContent = message;
+            messageModal.classList.remove('hidden');
+        }
+
+        // --- 隐藏模态框 ---
+        function hideModal() {
+            messageModal.classList.add('hidden');
+        }
+
+        // --- 事件监听 ---
+        window.addEventListener('keydown', (e) => {
+            if (!gameActive && e.key !== "Enter" && e.key !== "Escape") return; // Allow Enter/Esc for modal even if game over
+            
+            if (messageModal.classList.contains('hidden')) { // Only handle game keys if modal is hidden
+                switch (e.key.toLowerCase()) { // Use toLowerCase for wasd
+                    case 'arrowup': case 'w': movePlayer(-1, 0); break;
+                    case 'arrowdown': case 's': movePlayer(1, 0); break;
+                    case 'arrowleft': case 'a': movePlayer(0, -1); break;
+                    case 'arrowright': case 'd': movePlayer(0, 1); break;
+                    case ' ': placeBomb(); e.preventDefault(); break; 
+                }
+            } else { // Modal is visible
+                if (e.key === "Enter" || e.key === "Escape") {
+                    modalCloseButton.click(); // Simulate click on modal close button
+                }
+            }
+        });
+
+        restartButton.addEventListener('click', initGame);
+        modalCloseButton.addEventListener('click', () => {
+            hideModal();
+            // Optional: Automatically restart or go to a menu
+            // initGame(); 
+        });
+
+        // --- 启动游戏 ---
+        initGame();
+    </script>
+</body>
+</html>

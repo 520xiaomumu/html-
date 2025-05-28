@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>消灭星星 - 单音效版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: manipulation;
+            overscroll-behavior: none;
+        }
+        .game-board {
+            display: grid;
+            border: 2px solid #374151; 
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2), 0 6px 6px rgba(0, 0, 0, 0.15);
+            aspect-ratio: 1 / 1;
+            max-width: 90vw;
+            max-height: 75vh; 
+            width: auto;   
+            height: auto;  
+            margin: auto;
+            padding: 5px; 
+            background-color: rgba(17, 24, 39, 0.3); 
+        }
+        .star { 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+            border-radius: 6px; 
+            box-shadow: inset 0 0 3px rgba(0,0,0,0.1), 
+                        inset 0 1px 2px rgba(255,255,255,0.2), 
+                        0 2px 4px rgba(0,0,0,0.25); 
+        }
+        .star:hover {
+            transform: scale(1.05) translateY(-2px);
+            box-shadow: inset 0 0 3px rgba(0,0,0,0.1), 
+                        inset 0 1px 2px rgba(255,255,255,0.2),
+                        0 5px 10px rgba(0,0,0,0.3);
+        }
+        .star.selected {
+            transform: scale(1.08);
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9), 
+                        inset 0 0 10px rgba(255,255,255,0.6), 
+                        0 4px 8px rgba(0,0,0,0.3);
+            z-index: 10; 
+        }
+
+        .star-icon { 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            color: white; 
+        }
+        .star-icon svg {
+            width: 65%; 
+            height: 65%;
+            filter: drop-shadow(1px 1px 1px rgba(0,0,0,0.4)); 
+        }
+
+        .star-red { background-image: linear-gradient(135deg, #F87171, #DC2626); }
+        .star-blue { background-image: linear-gradient(135deg, #60A5FA, #2563EB); }
+        .star-green { background-image: linear-gradient(135deg, #4ADE80, #16A34A); }
+        .star-yellow { background-image: linear-gradient(135deg, #FACC15, #D97706); } 
+        .star-purple { background-image: linear-gradient(135deg, #A78BFA, #7C3AED); }
+
+        .modal {
+            display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%;
+            overflow: auto; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: linear-gradient(145deg, #374155, #1E293B); 
+            color: white; margin: auto; padding: 25px; border: 1px solid #4B5563; 
+            width: 85%; max-width: 420px; text-align: center; border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+        }
+        .modal-button {
+            padding: 12px 24px; margin: 12px; border-radius: 8px; cursor: pointer; font-weight: 600;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: none;
+        }
+        .bg-theme {
+            background: linear-gradient(160deg, #5B21B6 0%, #2E1065 100%); 
+        }
+        .btn-primary {
+            background-image: linear-gradient(to right, #4F46E5, #6366F1); color: white;
+        }
+        .btn-primary:hover {
+            background-image: linear-gradient(to right, #4338CA, #4F46E5); transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        .btn-secondary {
+            background-image: linear-gradient(to right, #6B7280, #9CA3AF); color: white;
+        }
+        .btn-secondary:hover {
+            background-image: linear-gradient(to right, #4B5563, #6B7280); transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        .star-pop { animation: pop 0.25s ease-out forwards; } 
+        @keyframes pop {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.15); opacity: 0.7; } 
+            100% { transform: scale(0.3); opacity: 0; } 
+        }
+        
+        .score-panel-item {
+            background-color: rgba(30, 41, 59, 0.7); 
+            border: 1px solid rgba(55, 65, 81, 0.7); 
+        }
+
+    </style>
+</head>
+<body class="bg-theme text-white min-h-screen flex flex-col items-center justify-center p-2 sm:p-4 select-none">
+
+    <div id="game-container" class="w-full max-w-xl bg-slate-800 bg-opacity-60 backdrop-blur-sm p-3 sm:p-6 rounded-xl shadow-2xl">
+        <header class="mb-3 sm:mb-4 text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold text-yellow-300 tracking-wide">消灭星星</h1>
+            <p id="rules" class="text-xs sm:text-sm text-slate-300 mt-1">点击两个或更多相连同色星星消除！</p>
+        </header>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4 text-sm sm:text-base">
+            <div class="score-panel-item p-2 rounded-lg text-center">
+                <span class="block text-slate-400 text-xs uppercase tracking-wider">等级</span>
+                <span id="level" class="block text-xl font-semibold text-sky-300">1</span>
+            </div>
+            <div class="score-panel-item p-2 rounded-lg text-center">
+                <span class="block text-slate-400 text-xs uppercase tracking-wider">当前分数</span>
+                <span id="current-score" class="block text-xl font-semibold text-emerald-300">0</span>
+            </div>
+            <div class="score-panel-item p-2 rounded-lg text-center">
+                <span class="block text-slate-400 text-xs uppercase tracking-wider">目标分数</span>
+                <span id="target-score" class="block text-xl font-semibold text-amber-300">2000</span>
+            </div>
+            <div class="score-panel-item p-2 rounded-lg text-center">
+                <span class="block text-slate-400 text-xs uppercase tracking-wider">最高分</span>
+                <span id="highest-score" class="block text-xl font-semibold text-rose-300">0</span>
+            </div>
+        </div>
+
+        <div id="game-board" class="game-board rounded-lg overflow-hidden">
+            </div>
+
+        <div class="mt-3 sm:mt-4 flex justify-center space-x-3 sm:space-x-4">
+            <button id="restart-button" class="btn-primary py-2 px-5 sm:py-3 sm:px-8 rounded-lg font-semibold text-sm sm:text-base">重新开始</button>
+            <button id="sound-toggle" class="btn-secondary py-2 px-5 sm:py-3 sm:px-8 rounded-lg font-semibold text-sm sm:text-base">声音: 开</button>
+        </div>
+         <p id="selection-info" class="text-center text-yellow-400 mt-2 text-sm h-5 font-medium"></p>
+    </div>
+
+    <div id="message-modal" class="modal">
+        <div class="modal-content">
+            <h2 id="modal-title" class="text-2xl font-bold mb-4 text-yellow-300">游戏结束</h2>
+            <p id="modal-message" class="mb-6 text-slate-200">未能达到目标分数。</p>
+            <div id="modal-score-info" class="mb-4 text-slate-300">
+                <p>你的分数: <span id="modal-final-score" class="font-semibold text-emerald-300">0</span></p>
+                <p>目标分数: <span id="modal-target-score" class="font-semibold text-amber-300">0</span></p>
+            </div>
+            <button id="modal-button" class="modal-button btn-primary">再玩一次</button>
+        </div>
+    </div>
+
+    <script>
+        // Game constants and variables
+        const BOARD_SIZE = 10;
+        const COLORS = ['red', 'blue', 'green', 'yellow', 'purple'];
+        const STAR_CLASSES = {
+            'red': 'star-red',
+            'blue': 'star-blue',
+            'green': 'star-green',
+            'yellow': 'star-yellow',
+            'purple': 'star-purple'
+        };
+        const STAR_SVG_ICON = `
+            <svg viewBox="0 0 28 28" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <path d="M14 2.267l3.139 6.373 7.038.975-5.106 4.885 1.232 6.98L14 18.34l-6.303 3.14.963-7.125L3.923 9.615l7.038-.975L14 2.267z"/>
+            </svg>`;
+
+        let board = [];
+        let currentScore = 0;
+        let level = 1;
+        let targetScore = 2000; 
+        let highestScore = localStorage.getItem('popstarHighestScoreV2') ? parseInt(localStorage.getItem('popstarHighestScoreV2')) : 0;
+        let soundEnabled = true;
+
+        // DOM Elements
+        const gameBoardElement = document.getElementById('game-board');
+        const levelElement = document.getElementById('level');
+        const currentScoreElement = document.getElementById('current-score');
+        const targetScoreElement = document.getElementById('target-score');
+        const highestScoreElement = document.getElementById('highest-score');
+        const restartButton = document.getElementById('restart-button');
+        const soundToggleButton = document.getElementById('sound-toggle');
+        const selectionInfoElement = document.getElementById('selection-info');
+
+        const messageModal = document.getElementById('message-modal');
+        const modalTitleElement = document.getElementById('modal-title');
+        const modalMessageElement = document.getElementById('modal-message');
+        const modalScoreInfoElement = document.getElementById('modal-score-info');
+        const modalFinalScoreElement = document.getElementById('modal-final-score');
+        const modalTargetScoreElement = document.getElementById('modal-target-score');
+        const modalButton = document.getElementById('modal-button');
+
+        // --- MODIFIED Sound Synthesis (Tone.js) ---
+        const popSynth = new Tone.Synth({ // For star elimination
+            oscillator: {
+                type: "sine" // A clean, fundamental sound
+            },
+            envelope: {
+                attack: 0.005, 
+                decay: 0.08,  
+                sustain: 0.01, 
+                release: 0.1   
+            },
+            volume: -10 // Normal volume level
+        }).toDestination();
+        
+        // This synth is no longer used for general clearing, but kept for potential future use or different events.
+        const clearSynth = new Tone.MonoSynth({ 
+            oscillator: { type: "triangle" }, 
+            envelope: { attack: 0.01, decay: 0.15, sustain: 0.03, release: 0.15 },
+            filterEnvelope: { attack: 0.005, decay: 0.05, sustain: 0, release: 0.2, baseFrequency: 600, octaves: 2 },
+            volume: -15 
+        }).toDestination();
+        
+        const levelUpSynth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
+            envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.3, attackCurve: "exponential" },
+            volume: -12 
+        }).toDestination();
+
+        const gameOverSynth = new Tone.MembraneSynth({
+            pitchDecay: 0.08, octaves: 4, oscillator: {type: "sine"},
+            envelope: { attack: 0.001, decay: 0.5, sustain: 0.01, release: 0.8, attackCurve: 'exponential'},
+            volume: -10 
+        }).toDestination();
+
+
+        // Game Logic Functions
+        function playSound(type, note = 'C5', duration = '16n') { // Default note for pop
+            if (!soundEnabled || !Tone.context.state === 'running') return;
+            try {
+                const now = Tone.now();
+                switch(type) {
+                    case 'pop':
+                        // Play a single pop sound, pitch can be slightly randomized if desired
+                        const randomPitchOffset = (Math.random() - 0.5) * 50; // Smaller pitch variation (0-50 cents)
+                        popSynth.triggerAttackRelease(Tone.Frequency(note).transpose(randomPitchOffset / 100), duration, now);
+                        break;
+                    // 'clear' case is removed from general star elimination
+                    case 'levelUp':
+                        levelUpSynth.triggerAttackRelease(["C4", "E4", "G4", "C5"], "8n", now);
+                        break;
+                    case 'gameOver':
+                         gameOverSynth.triggerAttackRelease("A2", "1n", now);
+                        break;
+                }
+            } catch (error) {
+                console.warn("Tone.js sound playback error:", error);
+            }
+        }
+
+        function initGame() {
+            currentScore = 0;
+            level = 1;
+            targetScore = 2000; 
+            board = [];
+            updateScoreDisplay();
+            createBoard();
+            renderBoard();
+            checkPossibleMoves(); 
+            if (Tone.context.state !== 'running') {
+                Tone.start(); 
+            }
+        }
+        
+        function nextLevel() {
+            level++;
+            targetScore = targetScore + 2000 + (level-1) * 500; 
+            updateScoreDisplay();
+            createBoard(); 
+            renderBoard();
+            checkPossibleMoves();
+            playSound('levelUp');
+        }
+
+        function createBoard() {
+            board = [];
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                const row = [];
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+                    row.push({ color: randomColor, id: `star-${r}-${c}`, selected: false });
+                }
+                board.push(row);
+            }
+        }
+
+        function renderBoard() {
+            gameBoardElement.innerHTML = ''; 
+            gameBoardElement.style.gridTemplateColumns = `repeat(${BOARD_SIZE}, 1fr)`;
+            gameBoardElement.style.gridTemplateRows = `repeat(${BOARD_SIZE}, 1fr)`;
+
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const starData = board[r][c];
+                    const starElement = document.createElement('div');
+                    starElement.classList.add('star'); 
+                    if (starData.color) { 
+                       starElement.classList.add(STAR_CLASSES[starData.color]);
+                    } else {
+                        starElement.style.background = 'transparent'; 
+                        starElement.style.boxShadow = 'none';
+                        starElement.style.cursor = 'default';
+                    }
+
+                    starElement.id = starData.id;
+                    starElement.dataset.r = r;
+                    starElement.dataset.c = c;
+                    
+                    if (starData.color) { 
+                        const starIconElement = document.createElement('span');
+                        starIconElement.classList.add('star-icon');
+                        starIconElement.innerHTML = STAR_SVG_ICON; 
+                        starElement.appendChild(starIconElement);
+                        starElement.addEventListener('click', handleStarClick);
+                    }
+                    gameBoardElement.appendChild(starElement);
+                }
+            }
+        }
+
+        let currentlySelectedStars = [];
+
+        function handleStarClick(event) {
+            if (Tone.context.state !== 'running') {
+                 Tone.start();
+            }
+            const r = parseInt(event.currentTarget.dataset.r);
+            const c = parseInt(event.currentTarget.dataset.c);
+            
+            if (!board[r] || !board[r][c]) {
+                console.error("Clicked on invalid board position:", r, c);
+                return;
+            }
+            const clickedStar = board[r][c];
+
+            if (!clickedStar || clickedStar.color === null) return;
+
+            currentlySelectedStars.forEach(sPos => {
+                if(board[sPos.r] && board[sPos.r][sPos.c]) { 
+                    const el = document.getElementById(board[sPos.r][sPos.c].id);
+                    if (el) el.classList.remove('selected');
+                    board[sPos.r][sPos.c].selected = false;
+                }
+            });
+            currentlySelectedStars = [];
+
+            const connectedStars = findConnectedStars(r, c, clickedStar.color);
+
+            if (connectedStars.length >= 2) {
+                currentlySelectedStars = connectedStars.map(s => ({r: s.r, c: s.c})); 
+                
+                connectedStars.forEach(s => {
+                    if(board[s.r] && board[s.r][s.c]){ 
+                        const el = document.getElementById(board[s.r][s.c].id);
+                        if (el) el.classList.add('selected');
+                        board[s.r][s.c].selected = true;
+                    }
+                });
+                const potentialScore = calculateScore(connectedStars.length);
+                selectionInfoElement.textContent = `选中 ${connectedStars.length} 个, 得分 ${potentialScore}`;
+                
+                processSelection(connectedStars.map(s => ({r: s.r, c: s.c, id: board[s.r][s.c].id })));
+
+            } else {
+                selectionInfoElement.textContent = ""; 
+            }
+        }
+        
+        function processSelection(starsToProcess) {
+            if (starsToProcess.length < 2) return;
+
+            const scoreGained = calculateScore(starsToProcess.length);
+            currentScore += scoreGained;
+            updateScoreDisplay();
+
+            starsToProcess.forEach(starPos => {
+                const starElement = document.getElementById(starPos.id);
+                if (starElement) {
+                    starElement.classList.add('star-pop'); 
+                }
+                if(board[starPos.r] && board[starPos.r][starPos.c]) { 
+                   board[starPos.r][starPos.c].color = null; 
+                }
+            });
+            
+            // --- MODIFIED: Play only one pop sound ---
+            playSound('pop', 'C5', '16n'); // Play a single, distinct pop sound
+
+            // Removed loop for multiple sounds and the conditional clearSynth call
+
+            setTimeout(() => {
+                dropStars();
+                shiftColumns();
+                renderBoard(); 
+                if (!checkPossibleMoves()) {
+                    handleEndOfTurn();
+                }
+                selectionInfoElement.textContent = ""; 
+            }, 250); // Adjusted timeout, no longer dependent on number of stars for sound
+        }
+
+        function findConnectedStars(r, c, color, visited = new Set()) {
+            const key = `${r}-${c}`;
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE || 
+                visited.has(key) || !board[r] || !board[r][c] || board[r][c].color !== color) {
+                return [];
+            }
+            visited.add(key);
+            let stars = [{ r, c, id: board[r][c].id }]; 
+            
+            stars = stars.concat(findConnectedStars(r + 1, c, color, visited));
+            stars = stars.concat(findConnectedStars(r - 1, c, color, visited));
+            stars = stars.concat(findConnectedStars(r, c + 1, color, visited));
+            stars = stars.concat(findConnectedStars(r, c - 1, color, visited));
+            return stars;
+        }
+
+        function calculateScore(numStars) {
+            return numStars * numStars * 5;
+        }
+
+        function dropStars() {
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                let emptyRow = BOARD_SIZE - 1;
+                for (let r = BOARD_SIZE - 1; r >= 0; r--) {
+                     if (!board[r] || !board[r][c]) continue; 
+                    if (board[r][c].color !== null) {
+                        if (r !== emptyRow) {
+                            board[emptyRow][c] = {...board[r][c]}; 
+                            board[emptyRow][c].id = `star-${emptyRow}-${c}`; 
+                            board[r][c] = { color: null, id: `star-${r}-${c}`, selected: false };
+                        }
+                        emptyRow--;
+                    }
+                }
+            }
+        }
+
+        function shiftColumns() {
+            let emptyCol = 0;
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                let columnHasStars = false;
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    if (!board[r] || !board[r][c]) continue;
+                    if (board[r][c].color !== null) {
+                        columnHasStars = true;
+                        break;
+                    }
+                }
+                if (columnHasStars) {
+                    if (c !== emptyCol) {
+                        for (let r = 0; r < BOARD_SIZE; r++) {
+                             if (!board[r] || !board[r][c] || !board[r][emptyCol]) continue;
+                            board[r][emptyCol] = {...board[r][c]};
+                            board[r][emptyCol].id = `star-${r}-${emptyCol}`; 
+                            board[r][c] = { color: null, id: `star-${r}-${c}`, selected: false };
+                        }
+                    }
+                    emptyCol++;
+                }
+            }
+        }
+        
+        function checkPossibleMoves() {
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                     if (!board[r] || !board[r][c] || board[r][c].color === null) continue;
+                    const connected = findConnectedStarsForCheck(r, c, board[r][c].color, new Set());
+                    if (connected.length >= 2) {
+                        return true; 
+                    }
+                }
+            }
+            return false; 
+        }
+
+        function findConnectedStarsForCheck(r, c, color, visitedCheck) {
+            const key = `${r}-${c}`;
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE || 
+                visitedCheck.has(key) || !board[r] || !board[r][c] || board[r][c].color !== color) {
+                return [];
+            }
+            visitedCheck.add(key);
+            let stars = [{ r, c }];
+            stars = stars.concat(findConnectedStarsForCheck(r + 1, c, color, visitedCheck));
+            stars = stars.concat(findConnectedStarsForCheck(r - 1, c, color, visitedCheck));
+            stars = stars.concat(findConnectedStarsForCheck(r, c + 1, color, visitedCheck));
+            stars = stars.concat(findConnectedStarsForCheck(r, c - 1, color, visitedCheck));
+            return stars;
+        }
+
+        function handleEndOfTurn() {
+            let remainingStars = 0;
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (board[r] && board[r][c] && board[r][c].color !== null) {
+                        remainingStars++;
+                    }
+                }
+            }
+            let bonusPoints = 0;
+            if (remainingStars === 0) {
+                bonusPoints = 2000; 
+            } else if (remainingStars < 10) {
+                bonusPoints = Math.max(0, 2000 - 20 * Math.pow(remainingStars -1 , 2) );
+                bonusPoints = Math.floor(bonusPoints / 10) * 10; 
+            }
+            if (bonusPoints > 0) {
+                currentScore += bonusPoints;
+            }
+            updateScoreDisplay();
+
+            if (currentScore >= targetScore) {
+                modalTitleElement.textContent = `恭喜通过第 ${level} 关!`;
+                let message = "准备好进入下一关了吗？";
+                if (bonusPoints > 0) message = `清屏奖励: +${bonusPoints}分!\n` + message;
+                modalMessageElement.innerHTML = message.replace(/\n/g, '<br>'); 
+                modalScoreInfoElement.style.display = 'block';
+                modalFinalScoreElement.textContent = currentScore;
+                modalTargetScoreElement.textContent = targetScore;
+                modalButton.textContent = "下一关";
+                modalButton.onclick = () => {
+                    messageModal.style.display = 'none';
+                    nextLevel();
+                };
+                playSound('levelUp');
+            } else {
+                modalTitleElement.textContent = "游戏结束";
+                let message = "未能达到目标分数。";
+                 if (bonusPoints > 0) message = `剩余奖励: +${bonusPoints}分!\n` + message;
+                modalMessageElement.innerHTML = message.replace(/\n/g, '<br>');
+                modalScoreInfoElement.style.display = 'block';
+                modalFinalScoreElement.textContent = currentScore;
+                modalTargetScoreElement.textContent = targetScore;
+                modalButton.textContent = "再玩一次";
+                modalButton.onclick = () => {
+                    messageModal.style.display = 'none';
+                    initGame(); 
+                };
+                playSound('gameOver');
+            }
+            messageModal.style.display = 'flex';
+            updateHighestScore();
+        }
+
+        function updateScoreDisplay() {
+            levelElement.textContent = level;
+            currentScoreElement.textContent = currentScore;
+            targetScoreElement.textContent = targetScore;
+            highestScoreElement.textContent = highestScore;
+        }
+        
+        function updateHighestScore() {
+            if (currentScore > highestScore) {
+                highestScore = currentScore;
+                localStorage.setItem('popstarHighestScoreV2', highestScore); 
+                updateScoreDisplay();
+            }
+        }
+
+        restartButton.addEventListener('click', () => {
+            if (Tone.context.state !== 'running') Tone.start();
+            initGame();
+        });
+
+        soundToggleButton.addEventListener('click', () => {
+            if (Tone.context.state !== 'running') Tone.start();
+            soundEnabled = !soundEnabled;
+            soundToggleButton.textContent = `声音: ${soundEnabled ? '开' : '关'}`;
+            if (soundEnabled) playSound('pop', 'C5', '16n'); // Test sound on toggle
+        });
+        
+        window.onclick = function(event) {
+            if (event.target == messageModal) {
+                // Do nothing
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            updateScoreDisplay(); 
+            initGame();
+            resizeGameBoard(); 
+            const resumeAudio = async () => {
+                if (Tone.context.state === 'suspended') {
+                    await Tone.start();
+                }
+            };
+            ['click', 'touchstart', 'mousedown'].forEach(eventType => {
+                 document.body.addEventListener(eventType, resumeAudio, { once: true });
+            });
+        });
+
+        function resizeGameBoard() {
+            const gameContainer = document.getElementById('game-container');
+            if (!gameContainer || !gameBoardElement) return;
+
+            const containerPadding = (parseFloat(getComputedStyle(gameContainer).paddingLeft) || 0) + 
+                                   (parseFloat(getComputedStyle(gameContainer).paddingRight) || 0);
+            const availableWidth = gameContainer.offsetWidth - containerPadding;
+            
+            const headerHeight = gameContainer.querySelector('header')?.offsetHeight || 60;
+            const statsHeight = gameContainer.querySelector('.grid.grid-cols-2')?.offsetHeight || 80;
+            const buttonsHeight = gameContainer.querySelector('.flex.justify-center')?.offsetHeight || 50;
+            const selectionInfoHeight = gameContainer.querySelector('#selection-info')?.offsetHeight || 20;
+            const otherElementsHeight = headerHeight + statsHeight + buttonsHeight + selectionInfoHeight + 40; 
+            
+            const availableHeight = window.innerHeight - otherElementsHeight - (parseFloat(getComputedStyle(document.body).paddingTop) || 0) * 2;
+
+            const boardPadding = (parseFloat(getComputedStyle(gameBoardElement).paddingLeft) || 0) * 2;
+            let boardContentSize = Math.min(availableWidth - boardPadding, availableHeight - boardPadding, 500); 
+            
+            boardContentSize = Math.max(100, boardContentSize); 
+
+            gameBoardElement.style.width = `${boardContentSize}px`;
+            gameBoardElement.style.height = `${boardContentSize}px`;
+        }
+
+        window.addEventListener('resize', resizeGameBoard);
+    </script>
+</body>
+</html>

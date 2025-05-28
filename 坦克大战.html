@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>坦克大战</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #1a202c; /* 深色背景 */
+            color: #e2e8f0; /* 浅色文字 */
+            overflow: hidden; /* 防止滚动条 */
+        }
+        #gameCanvas {
+            background-color: #2d3748; /* 游戏区域背景色 */
+            border: 2px solid #4a5568;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem; /* 元素间距 */
+        }
+        .controls-panel {
+            display: flex;
+            flex-direction: column; /* Stack items vertically */
+            align-items: center;    /* Center items horizontally */
+            gap: 0.75rem;           /* Adjust gap for vertical stacking */
+            background-color: #2d3748;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        .button-row { /* Wrapper for buttons to be in a row */
+            display: flex;
+            gap: 1rem;
+        }
+        .info-panel {
+            display: flex;
+            justify-content: space-around;
+            width: 100%; 
+        }
+        .info-panel span {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        button {
+            background-color: #4a5568;
+            color: #e2e8f0;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        button:hover {
+            background-color: #718096;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: #2d3748;
+            padding: 2rem;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .modal-content h2 {
+            margin-top: 0;
+            color: #a0aec0;
+        }
+        .controls-info {
+            font-size: 0.9rem;
+            color: #a0aec0;
+            text-align: center; 
+            width: 100%; 
+        }
+        .controls-info p {
+            margin: 5px 0;
+        }
+        #muteButton.muted {
+            background-color: #c53030; 
+        }
+        #muteButton.muted:hover {
+            background-color: #e53e3e;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="info-panel" id="infoPanel">
+            <span id="score">分数: 0</span>
+            <span id="lives">生命: 3</span>
+            <span id="level">关卡: 1</span>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <div class="controls-panel">
+            <div class="button-row">
+                <button id="startButton">开始游戏</button>
+                <button id="muteButton">静音</button> 
+            </div>
+            <div class="controls-info">
+                <p>移动: WASD 或 方向键</p>
+                <p>射击: 空格键</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="gameOverModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2 id="gameOverText">游戏结束!</h2>
+            <p id="finalScore">你的分数: 0</p>
+            <button id="restartButton">重新开始</button>
+        </div>
+    </div>
+
+    <script>
+        // Firebase (omitted for brevity, assumed not used for this audio update)
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const infoPanel = document.getElementById('infoPanel');
+
+        const scoreDisplay = document.getElementById('score');
+        const livesDisplay = document.getElementById('lives');
+        const levelDisplay = document.getElementById('level');
+        const startButton = document.getElementById('startButton');
+        const muteButton = document.getElementById('muteButton'); // Mute button
+        const gameOverModal = document.getElementById('gameOverModal');
+        const gameOverText = document.getElementById('gameOverText');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+
+        const TANK_WIDTH = 40;
+        const TANK_HEIGHT = 40;
+        const TURRET_WIDTH = 6;
+        const TURRET_LENGTH = 20;
+        const BULLET_RADIUS = 4;
+        const BULLET_SPEED = 7;
+        const PLAYER_SPEED = 3;
+        const ENEMY_SPEED = 1.5; 
+        const ENEMY_SHOOT_INTERVAL = 1800; 
+
+        const WALL_SIZE = 40; 
+
+        let player;
+        let enemies = [];
+        let bullets = [];
+        let explosions = [];
+        let walls = []; 
+
+        let score = 0;
+        let lives = 3;
+        let level = 1;
+        let gameRunning = false;
+        let gameOver = false;
+        let keys = {};
+        let enemySpawnTimer = 0;
+        let maxEnemies = 3;
+        let audioInitialized = false; 
+
+        // --- Audio Manager ---
+        const audioManager = {
+            isMuted: false,
+            synths: {},
+            shootPool: [], 
+            shootPoolIndex: 0, 
+            wallHitPool: [], // Pool for wallHit synths
+            wallHitPoolIndex: 0, // Current index for wallHit pool
+            bgMusicLoop: null,
+            effectsVolume: null, 
+            musicVolume: null,   
+
+            async init() {
+                if (audioInitialized) return;
+                try {
+                    await Tone.start();
+                    console.log("AudioContext started successfully!");
+                    audioInitialized = true;
+
+                    this.effectsVolume = new Tone.Volume(-10).toDestination(); 
+                    this.musicVolume = new Tone.Volume(-18).toDestination();   
+
+                    const shootPoolSize = 5; 
+                    for (let i = 0; i < shootPoolSize; i++) {
+                        this.shootPool.push(new Tone.NoiseSynth({
+                            noise: { type: "white" },
+                            envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 },
+                            volume: -15 
+                        }).connect(this.effectsVolume));
+                    }
+
+                    const wallHitPoolSize = 3; // Pool size for wall hit sounds
+                    for (let i = 0; i < wallHitPoolSize; i++) {
+                        this.wallHitPool.push(new Tone.MembraneSynth({
+                            pitchDecay: 0.02,
+                            octaves: 2,
+                            oscillator: {type: "sawtooth"},
+                            envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 },
+                            volume: -12
+                        }).connect(this.effectsVolume));
+                    }
+
+
+                    this.synths.explosion = new Tone.MembraneSynth({
+                        pitchDecay: 0.05,
+                        octaves: 5,
+                        oscillator: { type: 'sine' },
+                        envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 0.4, attackCurve: 'exponential' }
+                    }).connect(this.effectsVolume);
+                    
+                    // this.synths.wallHit is now a pool, direct reference removed from here
+
+                    this.synths.gameOver = new Tone.PolySynth(Tone.Synth, { 
+                        oscillator: { type: "triangle" },
+                        envelope: { attack: 0.02, decay: 0.1, sustain: 0.3, release: 0.5 }
+                    }).connect(this.effectsVolume);
+                    
+                    this.synths.levelUp = new Tone.PolySynth(Tone.Synth, { 
+                         oscillator: { type: "square" },
+                         envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 }
+                    }).connect(this.effectsVolume);
+
+                    this.synths.bgMusic = new Tone.MonoSynth({
+                        oscillator: { type: 'sawtooth' },
+                        envelope: { attack: 0.1, decay: 0.2, sustain: 0.3, release: 0.5 },
+                        filterEnvelope: { attack: 0.05, decay: 0.1, sustain: 0.5, release: 0.8, baseFrequency: 200, octaves: 3 }
+                    }).connect(this.musicVolume);
+
+                    const musicPattern = [
+                        { time: '0:0', note: 'C3', duration: '8n' }, { time: '0:0:2', note: 'Eb3', duration: '8n' },
+                        { time: '0:1', note: 'G2', duration: '4n' }, { time: '0:2', note: 'C3', duration: '8n' },
+                        { time: '0:2:2', note: 'Eb3', duration: '8n' }, { time: '0:3', note: 'Ab2', duration: '4n' },
+                        { time: '1:0', note: 'C3', duration: '8n' }, { time: '1:0:2', note: 'Eb3', duration: '8n' },
+                        { time: '1:1', note: 'G2', duration: '4n' }, { time: '1:2', note: 'F2', duration: '2n' },
+                    ];
+
+                    this.bgMusicLoop = new Tone.Part((time, value) => {
+                        this.synths.bgMusic.triggerAttackRelease(value.note, value.duration, time);
+                    }, musicPattern).start(0);
+                    this.bgMusicLoop.loop = true;
+                    this.bgMusicLoop.loopEnd = '2m'; 
+                    Tone.Transport.bpm.value = 100; 
+
+                } catch (e) {
+                    console.error("Error starting AudioContext or initializing Tone.js:", e);
+                }
+            },
+
+            playShoot() {
+                if (this.isMuted || !audioInitialized || this.shootPool.length === 0) return;
+                const synth = this.shootPool[this.shootPoolIndex];
+                synth.triggerAttackRelease("16n", Tone.now());
+                this.shootPoolIndex = (this.shootPoolIndex + 1) % this.shootPool.length;
+            },
+
+            playExplosion(isSmall = false) {
+                if (this.isMuted || !audioInitialized || !this.synths.explosion) return;
+                const note = isSmall ? 'C2' : 'G1';
+                const volumeBoost = isSmall ? 0 : 3; 
+                this.synths.explosion.triggerAttackRelease(note, '0.5s', Tone.now(), 0.8 + volumeBoost);
+            },
+            
+            playWallHit() {
+                if (this.isMuted || !audioInitialized || this.wallHitPool.length === 0) return;
+                const synth = this.wallHitPool[this.wallHitPoolIndex];
+                synth.triggerAttackRelease('A1', '0.2s', Tone.now(), 0.6);
+                this.wallHitPoolIndex = (this.wallHitPoolIndex + 1) % this.wallHitPool.length;
+            },
+
+            playGameOver() {
+                if (this.isMuted || !audioInitialized || !this.synths.gameOver) return;
+                this.synths.gameOver.triggerAttackRelease(['C3', 'G2', 'Eb2'], '1s', Tone.now());
+            },
+            
+            playLevelUp() {
+                 if (this.isMuted || !audioInitialized || !this.synths.levelUp) return;
+                 this.synths.levelUp.triggerAttackRelease(['C4', 'E4', 'G4', 'C5'], '0.5s', Tone.now());
+            },
+
+            startMusic() {
+                if (this.isMuted || !audioInitialized || !this.bgMusicLoop) return;
+                if (Tone.Transport.state !== 'started') {
+                    Tone.Transport.start();
+                }
+            },
+
+            stopMusic() {
+                if (!audioInitialized || !this.bgMusicLoop) return;
+            },
+
+            toggleMute() {
+                this.isMuted = !this.isMuted;
+                Tone.Destination.mute = this.isMuted;
+                muteButton.textContent = this.isMuted ? '取消静音' : '静音';
+                muteButton.classList.toggle('muted', this.isMuted);
+                if (!this.isMuted && gameRunning && audioInitialized) {
+                    this.startMusic();
+                }
+                console.log(this.isMuted ? "Audio Muted" : "Audio Unmuted");
+            }
+        };
+        muteButton.addEventListener('click', () => audioManager.toggleMute());
+
+
+        function resizeCanvas() {
+            const maxWidth = 800;
+            const maxHeight = 600;
+            const aspectRatio = 4 / 3;
+
+            let newWidth = window.innerWidth * 0.8;
+            let newHeight = window.innerHeight * 0.7;
+
+            if (newWidth / newHeight > aspectRatio) {
+                newWidth = newHeight * aspectRatio;
+            } else {
+                newHeight = newWidth / aspectRatio;
+            }
+
+            newWidth = Math.min(newWidth, maxWidth);
+            newHeight = Math.min(newHeight, maxHeight);
+            
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+            infoPanel.style.width = `${newWidth}px`; 
+
+            if (gameRunning) {
+                draw();
+            } else {
+                if (walls.length > 0) draw();
+            }
+        }
+
+        class Wall {
+            constructor(x, y, width, height, destructible = true, health = 3, color = '#8B4513', indestructibleColor = '#555555') {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.destructible = destructible;
+                this.health = destructible ? health : Infinity;
+                this.maxHealth = health; 
+                this.color = destructible ? color : indestructibleColor;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                if (this.destructible && this.health < this.maxHealth && this.health > 0) {
+                    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+                    ctx.lineWidth = 1 + (this.maxHealth - this.health); 
+                    const cracks = (this.maxHealth - this.health) * 2;
+                    for (let i = 0; i < cracks; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(this.x + Math.random() * this.width, this.y + Math.random() * this.height);
+                        ctx.lineTo(this.x + Math.random() * this.width, this.y + Math.random() * this.height);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            takeDamage() {
+                if (this.destructible) {
+                    this.health--;
+                    if (this.health <= 0) {
+                        return true; 
+                    }
+                }
+                return false; 
+            }
+        }
+
+        function generateWalls() {
+            walls = []; 
+
+            const BORDER_THICKNESS = WALL_SIZE / 2;
+            walls.push(new Wall(0, 0, canvas.width, BORDER_THICKNESS, false)); 
+            walls.push(new Wall(0, canvas.height - BORDER_THICKNESS, canvas.width, BORDER_THICKNESS, false)); 
+            walls.push(new Wall(0, BORDER_THICKNESS, BORDER_THICKNESS, canvas.height - 2 * BORDER_THICKNESS, false)); 
+            walls.push(new Wall(canvas.width - BORDER_THICKNESS, BORDER_THICKNESS, BORDER_THICKNESS, canvas.height - 2 * BORDER_THICKNESS, false)); 
+
+            const wallGridWidth = Math.floor(canvas.width / WALL_SIZE);
+            const wallGridHeight = Math.floor(canvas.height / WALL_SIZE);
+
+            const wallPositions = [
+                {x: 3, y: 3, w: 5, h: 1}, {x: wallGridWidth - 8, y: 3, w: 5, h: 1},
+                {x: 3, y: 5, w: 1, h: 4}, {x: wallGridWidth - 4, y: 5, w: 1, h: 4},
+                {x: Math.floor(wallGridWidth/2) - 2, y: 7, w: 4, h: 1},
+                {x: 6, y: wallGridHeight - 5, w: 3, h: 1},
+                {x: wallGridWidth - 9, y: wallGridHeight - 5, w: 3, h: 1},
+            ];
+
+            wallPositions.forEach(pos => {
+                 for(let i=0; i < pos.w; i++) {
+                    for(let j=0; j < pos.h; j++) {
+                        const wallX = (pos.x + i) * WALL_SIZE;
+                        const wallY = (pos.y + j) * WALL_SIZE;
+                        if (wallX > BORDER_THICKNESS && wallX + WALL_SIZE < canvas.width - BORDER_THICKNESS &&
+                            wallY > BORDER_THICKNESS && wallY + WALL_SIZE < canvas.height - BORDER_THICKNESS - TANK_HEIGHT*2) { 
+                             walls.push(new Wall(wallX, wallY, WALL_SIZE, WALL_SIZE, true, 2)); 
+                        }
+                    }
+                 }
+            });
+        }
+        
+        function checkRectCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        function checkBulletWallCollision(bullet, wall) {
+            const bulletLeft = bullet.x - bullet.radius;
+            const bulletRight = bullet.x + bullet.radius;
+            const bulletTop = bullet.y - bullet.radius;
+            const bulletBottom = bullet.y + bullet.radius;
+
+            return bulletRight > wall.x &&
+                   bulletLeft < wall.x + wall.width &&
+                   bulletBottom > wall.y &&
+                   bulletTop < wall.y + wall.height;
+        }
+
+
+        class Tank {
+            constructor(x, y, color, isPlayer = false) {
+                this.x = x;
+                this.y = y;
+                this.width = TANK_WIDTH;
+                this.height = TANK_HEIGHT;
+                this.color = color;
+                this.isPlayer = isPlayer;
+                this.speed = isPlayer ? PLAYER_SPEED : ENEMY_SPEED;
+                this.dir = 'UP'; 
+                this.turretAngle = 0; 
+                this.lastShotTime = 0;
+                this.shootCooldown = isPlayer ? 500 : (ENEMY_SHOOT_INTERVAL + Math.random() * 500 - 250); 
+                this.aiMoveTimer = 0;
+                this.aiMoveInterval = Math.random() * 1500 + 800; 
+                this.aiShootTimer = Math.random() * this.shootCooldown; 
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+
+                ctx.fillStyle = this.color;
+                ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
+                
+                ctx.rotate(this.turretAngle);
+                ctx.fillStyle = this.isPlayer ? '#A0AEC0' : '#718096'; 
+                ctx.fillRect(-TURRET_WIDTH / 2, -TURRET_LENGTH, TURRET_WIDTH, TURRET_LENGTH);
+                
+                ctx.restore();
+
+                if (this.isPlayer) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width / 2, this.y + this.height / 2, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            move() {
+                let dx = 0;
+                let dy = 0;
+                switch (this.dir) {
+                    case 'UP': dy = -this.speed; this.turretAngle = 0; break;
+                    case 'DOWN': dy = this.speed; this.turretAngle = Math.PI; break;
+                    case 'LEFT': dx = -this.speed; this.turretAngle = -Math.PI / 2; break;
+                    case 'RIGHT': dx = this.speed; this.turretAngle = Math.PI / 2; break;
+                }
+
+                const originalX = this.x;
+                const originalY = this.y;
+                const nextX = this.x + dx;
+                const nextY = this.y + dy;
+                let collisionOccurred = false;
+
+                this.x = nextX;
+                this.y = nextY;
+
+                if (this.x < 0 || this.x + this.width > canvas.width || this.y < 0 || this.y + this.height > canvas.height) {
+                    collisionOccurred = true;
+                }
+
+                for (const wall of walls) {
+                    if (checkRectCollision(this, wall)) {
+                        collisionOccurred = true;
+                        break;
+                    }
+                }
+                
+                const otherTanks = this.isPlayer ? enemies : [player, ...enemies.filter(e => e !== this)];
+                for (const otherTank of otherTanks) {
+                    if (otherTank && checkRectCollision(this, otherTank)) {
+                        collisionOccurred = true;
+                        break;
+                    }
+                }
+
+                if (collisionOccurred) {
+                    this.x = originalX; 
+                    this.y = originalY;
+                }
+            }
+            
+            shoot() {
+                const currentTime = Date.now();
+                if (currentTime - this.lastShotTime > this.shootCooldown) {
+                    audioManager.playShoot(); 
+                    let bulletX = this.x + this.width / 2;
+                    let bulletY = this.y + this.height / 2;
+                    
+                    bulletX += Math.sin(this.turretAngle) * (TURRET_LENGTH * 0.8); 
+                    bulletY += -Math.cos(this.turretAngle) * (TURRET_LENGTH * 0.8);
+
+                    bullets.push(new Bullet(bulletX, bulletY, this.turretAngle, this.isPlayer ? '#63B3ED' : '#FC8181', this.isPlayer)); 
+                    this.lastShotTime = currentTime;
+                }
+            }
+
+            updateAI(deltaTime) {
+                if (this.isPlayer) return;
+
+                this.aiMoveTimer += deltaTime;
+                this.aiShootTimer += deltaTime;
+
+                if (this.aiMoveTimer > this.aiMoveInterval) {
+                    const dirs = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
+                    if (player && Math.random() < 0.6) { 
+                        const dxPlayer = player.x - this.x;
+                        const dyPlayer = player.y - this.y;
+                        if (Math.abs(dxPlayer) > Math.abs(dyPlayer)) {
+                            this.dir = dxPlayer > 0 ? 'RIGHT' : 'LEFT';
+                        } else {
+                            this.dir = dyPlayer > 0 ? 'DOWN' : 'UP';
+                        }
+                    } else {
+                         this.dir = dirs[Math.floor(Math.random() * dirs.length)];
+                    }
+                    this.aiMoveTimer = 0;
+                    this.aiMoveInterval = Math.random() * 1500 + 800; 
+                }
+                this.move(); 
+
+                if (this.aiShootTimer > this.shootCooldown) {
+                    switch (this.dir) {
+                        case 'UP': this.turretAngle = 0; break;
+                        case 'DOWN': this.turretAngle = Math.PI; break;
+                        case 'LEFT': this.turretAngle = -Math.PI / 2; break;
+                        case 'RIGHT': this.turretAngle = Math.PI / 2; break;
+                        default: this.turretAngle = 0; 
+                    }
+                    this.shoot();
+                    this.aiShootTimer = 0; 
+                }
+            }
+        }
+
+        class Bullet {
+            constructor(x, y, angle, color, isPlayerBullet) {
+                this.x = x;
+                this.y = y;
+                this.radius = BULLET_RADIUS;
+                this.color = color;
+                this.angle = angle; 
+                this.speed = BULLET_SPEED;
+                this.isPlayerBullet = isPlayerBullet;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x - Math.sin(this.angle) * this.speed * 0.5, 
+                          this.y + Math.cos(this.angle) * this.speed * 0.5, 
+                          this.radius * 0.6, 0, Math.PI * 2);
+                ctx.fillStyle = this.color.replace(')', ', 0.5)').replace('rgb', 'rgba'); 
+                ctx.fill();
+            }
+
+            move() {
+                this.x += Math.sin(this.angle) * this.speed;
+                this.y -= Math.cos(this.angle) * this.speed; 
+            }
+        }
+        
+        class Explosion {
+            constructor(x, y, size = 'normal') {
+                this.x = x;
+                this.y = y;
+                this.radius = size === 'small' ? 3 : 5;
+                this.maxRadius = size === 'small' ? 20 : 40;
+                this.life = size === 'small' ? 20 : 30; 
+                this.opacity = 1;
+                this.colors = size === 'small' ? ['#FFA500', '#FF4500'] : ['#FFD700', '#FFA500', '#FF4500']; 
+            }
+
+            draw() {
+                for (let i = 0; i < this.colors.length; i++) {
+                    ctx.beginPath();
+                    const currentRadius = this.radius * (1 - i * 0.2); 
+                    ctx.arc(this.x, this.y, Math.max(0, currentRadius), 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${this.hexToRgb(this.colors[i])}, ${this.opacity * (1 - i * 0.1)})`;
+                    ctx.fill();
+                }
+            }
+             hexToRgb(hex) { 
+                let r = 0, g = 0, b = 0;
+                if (hex.length == 4) { 
+                    r = parseInt(hex[1] + hex[1], 16);
+                    g = parseInt(hex[2] + hex[2], 16);
+                    b = parseInt(hex[3] + hex[3], 16);
+                } else if (hex.length == 7) { 
+                    r = parseInt(hex[1] + hex[2], 16);
+                    g = parseInt(hex[3] + hex[4], 16);
+                    b = parseInt(hex[5] + hex[6], 16);
+                }
+                return `${r},${g},${b}`;
+            }
+
+            update() {
+                this.radius += (this.maxRadius - this.radius) * 0.15; 
+                this.life--;
+                this.opacity = Math.max(0, this.life / (this.maxRadius === 20 ? 20 : 30));
+            }
+        }
+
+        function spawnEnemy() {
+            if (enemies.length < maxEnemies) {
+                let x, y, newEnemy;
+                let attempts = 0;
+                const MAX_SPAWN_ATTEMPTS = 30; 
+                do {
+                    const edge = Math.floor(Math.random() * 4);
+                    const margin = WALL_SIZE * 1.5; 
+                    switch (edge) {
+                        case 0: x = Math.random() * (canvas.width - TANK_WIDTH - 2 * margin) + margin; y = margin; break; 
+                        case 1: x = Math.random() * (canvas.width - TANK_WIDTH - 2 * margin) + margin; y = canvas.height - TANK_HEIGHT - margin; break; 
+                        case 2: x = margin; y = Math.random() * (canvas.height - TANK_HEIGHT - 2 * margin) + margin; break; 
+                        case 3: x = canvas.width - TANK_WIDTH - margin; y = Math.random() * (canvas.height - TANK_HEIGHT - 2 * margin) + margin; break; 
+                    }
+                    newEnemy = new Tank(x, y, '#2F855A'); 
+                    attempts++;
+                    if (attempts > MAX_SPAWN_ATTEMPTS) {
+                        console.warn("Could not find a clear spawn point for enemy.");
+                        return; 
+                    }
+                } while (
+                    walls.some(wall => checkRectCollision(newEnemy, wall)) || 
+                    enemies.some(existingEnemy => checkRectCollision(newEnemy, existingEnemy)) || 
+                    (player && checkRectCollision(newEnemy, player))
+                );
+                enemies.push(newEnemy);
+            }
+        }
+        
+        function tryRespawnPlayer() {
+            let respawnX, respawnY;
+            let respawnAttempts = 0;
+            const MAX_RESPAWN_ATTEMPTS = 20;
+            do {
+                respawnX = canvas.width / 2 - TANK_WIDTH / 2;
+                respawnY = canvas.height - TANK_HEIGHT - WALL_SIZE * 1.5 - (respawnAttempts * 5); 
+                player.x = respawnX;
+                player.y = respawnY;
+                respawnAttempts++;
+                if (respawnAttempts > MAX_RESPAWN_ATTEMPTS) {
+                    console.warn("Could not find a clear respawn point for player. Placing at default safe spot.");
+                    player.x = canvas.width / 2 - TANK_WIDTH / 2;
+                    player.y = canvas.height - TANK_HEIGHT - WALL_SIZE * 1.5; 
+                    if (walls.some(wall => checkRectCollision(player, wall)) || enemies.some(enemy => checkRectCollision(player, enemy))) {
+                        player.x = WALL_SIZE * 1.5; player.y = canvas.height - TANK_HEIGHT - WALL_SIZE * 1.5;
+                    }
+                    break;
+                }
+            } while (walls.some(wall => checkRectCollision(player, wall)) || enemies.some(enemy => checkRectCollision(player, enemy)));
+            player.dir = 'UP';
+            player.turretAngle = 0;
+        }
+
+        function update(deltaTime) {
+            if (gameOver) return;
+
+            if (player) {
+                let wantsToMove = false;
+                if (keys['w']) { player.dir = 'UP'; wantsToMove = true; }
+                else if (keys['s']) { player.dir = 'DOWN'; wantsToMove = true; }
+                else if (keys['a']) { player.dir = 'LEFT'; wantsToMove = true; }
+                else if (keys['d']) { player.dir = 'RIGHT'; wantsToMove = true; }
+                else if (keys['arrowup']) { player.dir = 'UP'; wantsToMove = true; }
+                else if (keys['arrowdown']) { player.dir = 'DOWN'; wantsToMove = true; }
+                else if (keys['arrowleft']) { player.dir = 'LEFT'; wantsToMove = true; }
+                else if (keys['arrowright']) { player.dir = 'RIGHT'; wantsToMove = true; }
+                
+                if (wantsToMove) {
+                    player.move();
+                } else { 
+                     switch (player.dir) {
+                        case 'UP': player.turretAngle = 0; break;
+                        case 'DOWN': player.turretAngle = Math.PI; break;
+                        case 'LEFT': player.turretAngle = -Math.PI / 2; break;
+                        case 'RIGHT': player.turretAngle = Math.PI / 2; break;
+                    }
+                }
+                if (keys[' ']) { 
+                    player.shoot();
+                }
+            }
+            
+            bullets.forEach((bullet, bIndex) => {
+                bullet.move();
+                if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+                    bullets.splice(bIndex, 1);
+                    return; 
+                }
+
+                for (let wIndex = walls.length - 1; wIndex >= 0; wIndex--) {
+                    const wall = walls[wIndex];
+                    if (checkBulletWallCollision(bullet, wall)) {
+                        bullets.splice(bIndex, 1); 
+                        audioManager.playWallHit(); 
+                        if (wall.takeDamage()) { 
+                            walls.splice(wIndex, 1); 
+                            audioManager.playExplosion(true); 
+                            explosions.push(new Explosion(wall.x + wall.width / 2, wall.y + wall.height / 2, 'small'));
+                        }
+                        return; 
+                    }
+                }
+            });
+
+            enemies.forEach(enemy => enemy.updateAI(deltaTime));
+            
+            explosions.forEach((exp, index) => {
+                exp.update();
+                if (exp.life <= 0) {
+                    explosions.splice(index, 1);
+                }
+            });
+
+            for (let bIndex = bullets.length - 1; bIndex >= 0; bIndex--) {
+                const bullet = bullets[bIndex];
+                if (!bullet) continue; 
+
+                if (bullet.isPlayerBullet) {
+                    for (let eIndex = enemies.length - 1; eIndex >= 0; eIndex--) {
+                        const enemy = enemies[eIndex];
+                        if (checkCollision(bullet, enemy)) { 
+                            bullets.splice(bIndex, 1);
+                            enemies.splice(eIndex, 1);
+                            audioManager.playExplosion(); 
+                            explosions.push(new Explosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2));
+                            score += 10;
+                            if (enemies.length === 0 && gameRunning) { 
+                                nextLevel();
+                            }
+                            break; 
+                        }
+                    }
+                } 
+                else if (player) { 
+                    if (checkCollision(bullet, player)) {
+                        bullets.splice(bIndex, 1);
+                        audioManager.playExplosion(); 
+                        explosions.push(new Explosion(player.x + player.width/2, player.y + player.height/2));
+                        lives--;
+                        if (lives <= 0) {
+                            triggerGameOver("你被击败了!");
+                        } else {
+                            tryRespawnPlayer();
+                        }
+                        break; 
+                    }
+                }
+            }
+            
+            enemySpawnTimer += deltaTime;
+            if (enemySpawnTimer > (4000 - level * 200) && enemies.length < maxEnemies) { 
+                spawnEnemy();
+                enemySpawnTimer = 0;
+            }
+            
+            updateUI();
+        }
+        
+        function checkCollision(circle, rect) { 
+            const distX = Math.abs(circle.x - rect.x - rect.width / 2);
+            const distY = Math.abs(circle.y - rect.y - rect.height / 2);
+
+            if (distX > (rect.width / 2 + circle.radius)) { return false; }
+            if (distY > (rect.height / 2 + circle.radius)) { return false; }
+
+            if (distX <= (rect.width / 2)) { return true; } 
+            if (distY <= (rect.height / 2)) { return true; }
+
+            const dx = distX - rect.width / 2;
+            const dy = distY - rect.height / 2;
+            return (dx * dx + dy * dy <= (circle.radius * circle.radius));
+        }
+
+        function draw() {
+            if (gameOver && !gameRunning) return; 
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+
+            walls.forEach(wall => wall.draw());
+
+            if (player) player.draw();
+            enemies.forEach(enemy => enemy.draw());
+            bullets.forEach(bullet => bullet.draw());
+            explosions.forEach(exp => exp.draw());
+        }
+
+        function updateUI() {
+            scoreDisplay.textContent = `分数: ${score}`;
+            livesDisplay.textContent = `生命: ${lives}`;
+            levelDisplay.textContent = `关卡: ${level}`;
+        }
+
+        function nextLevel() {
+            level++;
+            audioManager.playLevelUp(); 
+            maxEnemies = 3 + Math.floor(level * 1.5); 
+            enemies = []; 
+            bullets = []; 
+            enemySpawnTimer = 0; 
+            if (player) {
+                 tryRespawnPlayer(); 
+            }
+            generateWalls(); 
+            
+            const levelUpMsg = document.createElement('div');
+            levelUpMsg.textContent = `第 ${level} 关!`;
+            levelUpMsg.style.position = 'fixed'; 
+            levelUpMsg.style.top = '50%';
+            levelUpMsg.style.left = '50%';
+            levelUpMsg.style.transform = 'translate(-50%, -50%)';
+            levelUpMsg.style.fontSize = 'clamp(2rem, 5vw, 4rem)'; 
+            levelUpMsg.style.color = '#F6E05E'; 
+            levelUpMsg.style.padding = '20px 40px';
+            levelUpMsg.style.backgroundColor = 'rgba(45, 55, 72, 0.85)'; 
+            levelUpMsg.style.borderRadius = '12px';
+            levelUpMsg.style.zIndex = '2000';
+            levelUpMsg.style.boxShadow = '0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -2px rgba(0,0,0,0.25)';
+            document.body.appendChild(levelUpMsg);
+            setTimeout(() => {
+                if (document.body.contains(levelUpMsg)) {
+                     document.body.removeChild(levelUpMsg);
+                }
+            }, 2500);
+        }
+        
+        let lastTime = 0;
+        function gameLoop(timestamp) {
+            if (!gameRunning) return;
+            
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+
+            update(deltaTime || 0); 
+            draw();
+            
+            if (!gameOver) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        async function startGame() { 
+            if (!audioInitialized) {
+                await audioManager.init(); 
+            }
+            
+            if (gameRunning && !gameOver) { 
+            }
+
+            console.log("Starting game...");
+            score = 0;
+            lives = 3;
+            level = 1;
+            maxEnemies = 3;
+            enemies = [];
+            bullets = [];
+            explosions = [];
+            enemySpawnTimer = 0;
+            
+            generateWalls(); 
+
+            player = new Tank(0,0, '#3182CE', true); 
+            tryRespawnPlayer();
+            
+            updateUI();
+            
+            gameOver = false;
+            gameRunning = true;
+            gameOverModal.style.display = 'none';
+            startButton.textContent = '重新开始'; 
+            audioManager.startMusic(); 
+
+            lastTime = performance.now(); 
+            requestAnimationFrame(gameLoop);
+        }
+
+        function triggerGameOver(message) {
+            console.log("Game Over:", message);
+            audioManager.playGameOver(); 
+            gameRunning = false;
+            gameOver = true;
+            gameOverText.textContent = message;
+            finalScoreDisplay.textContent = `你的分数: ${score}`;
+            gameOverModal.style.display = 'flex';
+        }
+
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true; 
+            if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(e.key.toLowerCase())) {
+                e.preventDefault();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', () => {
+            gameOverModal.style.display = 'none';
+            startGame(); 
+        });
+
+        window.addEventListener('resize', resizeCanvas);
+
+        window.onload = () => {
+            resizeCanvas(); 
+            generateWalls(); 
+            draw(); 
+            muteButton.textContent = audioManager.isMuted ? '取消静音' : '静音';
+            muteButton.classList.toggle('muted', audioManager.isMuted);
+        };
+
+    </script>
+</body>
+</html>

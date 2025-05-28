@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>四子棋游戏</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f4f8; /* Tailwind bg-slate-100 */
+            color: #334155; /* Tailwind text-slate-700 */
+        }
+        .container {
+            background-color: #ffffff; /* Tailwind bg-white */
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            text-align: center;
+            width: 90%;
+            max-width: 700px; /* Max width for the game container */
+        }
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(20, 30px); /* 20列 */
+            grid-template-rows: repeat(4, 30px);    /* 4行 */
+            gap: 4px;
+            margin: 20px auto;
+            border: 2px solid #94a3b8; /* Tailwind border-slate-400 */
+            padding: 5px;
+            background-color: #e2e8f0; /* Tailwind bg-slate-200 */
+            border-radius: 8px;
+            width: fit-content;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+        .cell {
+            width: 30px;
+            height: 30px;
+            background-color: #cbd5e1; /* Tailwind bg-slate-300 */
+            border: 1px solid #94a3b8; /* Tailwind border-slate-400 */
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        .cell:hover:not(.player1):not(.player2) { /* Only hover effect on empty cells */
+            background-color: #94a3b8; /* Tailwind bg-slate-400 */
+            transform: scale(1.05);
+        }
+        .cell.player1 {
+            background-color: #ef4444; /* Tailwind bg-red-500 */
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.3);
+        }
+        .cell.player2 {
+            background-color: #3b82f6; /* Tailwind bg-blue-500 */
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.3);
+        }
+        .message-area {
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            min-height: 2em;
+        }
+        .button-container {
+            display: flex;
+            flex-direction: column; /* Stack buttons on small screens */
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .game-button, .mode-button {
+            color: white;
+            padding: 10px 15px; /* Adjusted padding for potentially longer text */
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem; /* Adjusted font size for more buttons */
+            transition: background-color 0.3s ease, opacity 0.3s ease;
+            width: 100%; /* Full width for stacked buttons */
+            max-width: 220px; /* Max width for buttons, slightly increased */
+        }
+        .game-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #reset-button { /* This is "返回主菜单" */
+            background-color: #64748b; /* Tailwind bg-slate-500 */
+        }
+        #reset-button:hover:not(:disabled) {
+            background-color: #475569; /* Tailwind bg-slate-600 */
+        }
+        #undo-button {
+            background-color: #f97316; /* Tailwind bg-orange-500 */
+        }
+        #undo-button:hover:not(:disabled) {
+            background-color: #ea580c; /* Tailwind bg-orange-600 */
+        }
+        #restart-current-game-button {
+             background-color: #10b981; /* Tailwind bg-emerald-500 */
+        }
+        #restart-current-game-button:hover:not(:disabled) {
+             background-color: #059669; /* Tailwind bg-emerald-600 */
+        }
+
+        #pvp-button {
+            background-color: #3b82f6; /* Tailwind bg-blue-500 */
+        }
+        #pvp-button:hover {
+            background-color: #2563eb; /* Tailwind bg-blue-600 */
+        }
+        #pvai-button { /* Button to go to AI first selection */
+            background-color: #8b5cf6; /* Tailwind bg-violet-500 */
+        }
+        #pvai-button:hover {
+            background-color: #7c3aed; /* Tailwind bg-violet-600 */
+        }
+        #player-starts-button{
+            background-color: #22c55e; /* Tailwind bg-green-500 */
+        }
+        #player-starts-button:hover{
+            background-color: #16a34a; /* Tailwind bg-green-600 */
+        }
+        #ai-starts-button{
+             background-color: #ec4899; /* Tailwind bg-pink-500 */
+        }
+        #ai-starts-button:hover{
+             background-color: #db2777; /* Tailwind bg-pink-600 */
+        }
+        #back-to-mode-select-button{
+            background-color: #6b7280; /* Tailwind bg-gray-500 */
+        }
+        #back-to-mode-select-button:hover{
+            background-color: #4b5563; /* Tailwind bg-gray-600 */
+        }
+
+
+        #game-area, #ai-first-selection-screen { display: none; } /* Initially hidden */
+
+        /* Responsive adjustments */
+        @media (min-width: 768px) { /* md breakpoint for button row */
+            .button-container {
+                flex-direction: row; 
+                justify-content: center;
+            }
+            .game-button, .mode-button {
+                width: auto; 
+                font-size: 1rem; /* Restore font size for larger screens */
+                padding: 10px 20px;
+            }
+        }
+
+        @media (max-width: 700px) {
+            #game-board {
+                grid-template-columns: repeat(20, 25px);
+                grid-template-rows: repeat(4, 25px);
+                gap: 3px;
+            }
+            .cell { width: 25px; height: 25px; }
+        }
+        @media (max-width: 580px) {
+             #game-board {
+                grid-template-columns: repeat(20, 20px);
+                grid-template-rows: repeat(4, 20px);
+                gap: 2px;
+            }
+            .cell { width: 20px; height: 20px; }
+            .container { padding: 15px; }
+            .message-area { font-size: 1rem; }
+            /* Button font size already adjusted for smaller screens */
+        }
+    </style>
+</head>
+<body>
+    <div id="mode-selection-screen" class="container">
+        <h2 class="text-xl font-semibold mb-6 text-slate-800">选择游戏模式</h2>
+        <div class="button-container">
+            <button id="pvp-button" class="mode-button">玩家 vs 玩家</button>
+            <button id="pvai-button" class="mode-button">玩家 vs AI</button>
+        </div>
+    </div>
+
+    <div id="ai-first-selection-screen" class="container">
+        <h2 class="text-xl font-semibold mb-6 text-slate-800">AI 对战设置</h2>
+        <p class="mb-4 text-slate-600">请选择谁先手：</p>
+        <div class="button-container">
+            <button id="player-starts-button" class="mode-button">玩家先手</button>
+            <button id="ai-starts-button" class="mode-button">AI先手</button>
+        </div>
+        <button id="back-to-mode-select-button" class="mode-button mt-6">返回模式选择</button>
+    </div>
+
+    <div id="game-area" class="container">
+        <h1 class="text-2xl font-bold mb-4 text-slate-800">四子棋游戏 (4x20)</h1>
+        <div id="message" class="message-area"></div>
+        <div id="game-board"></div>
+        <div class="button-container">
+            <button id="undo-button" class="game-button">悔棋</button>
+            <button id="restart-current-game-button" class="game-button">重新开始本局</button>
+            <button id="reset-button" class="game-button">返回主菜单</button>
+        </div>
+    </div>
+
+    <script>
+        const ROWS = 4;
+        const COLS = 20;
+        const CONNECT_N = 4; 
+
+        let board = [];
+        let currentPlayer = 1; 
+        let gameOver = false;
+        let moveHistory = []; 
+        let gameMode = 'pvp'; 
+        const AI_PLAYER = 2; 
+        let aiStartsFirst = false; // New global variable
+
+        const gameBoardElement = document.getElementById('game-board');
+        const messageElement = document.getElementById('message');
+        const resetButton = document.getElementById('reset-button'); // Returns to main menu
+        const undoButton = document.getElementById('undo-button');
+        const restartCurrentGameButton = document.getElementById('restart-current-game-button'); // New button
+
+        const modeSelectionScreen = document.getElementById('mode-selection-screen');
+        const aiFirstSelectionScreen = document.getElementById('ai-first-selection-screen'); // New screen
+        const gameArea = document.getElementById('game-area');
+
+        const pvpButton = document.getElementById('pvp-button');
+        const pvaiButton = document.getElementById('pvai-button'); // Takes to AI first selection
+        const playerStartsButton = document.getElementById('player-starts-button');
+        const aiStartsButton = document.getElementById('ai-starts-button');
+        const backToModeSelectButton = document.getElementById('back-to-mode-select-button');
+
+
+        // --- Game Mode and Start Logic ---
+        pvpButton.addEventListener('click', () => {
+            aiStartsFirst = false; // Reset for PvP
+            startGame('pvp');
+        });
+
+        pvaiButton.addEventListener('click', () => {
+            modeSelectionScreen.style.display = 'none';
+            aiFirstSelectionScreen.style.display = 'block';
+        });
+
+        playerStartsButton.addEventListener('click', () => {
+            aiStartsFirst = false;
+            startGame('pvai');
+        });
+
+        aiStartsButton.addEventListener('click', () => {
+            aiStartsFirst = true;
+            startGame('pvai');
+        });
+        
+        backToModeSelectButton.addEventListener('click', () => {
+            aiFirstSelectionScreen.style.display = 'none';
+            modeSelectionScreen.style.display = 'block';
+        });
+
+        function startGame(mode) {
+            gameMode = mode;
+            modeSelectionScreen.style.display = 'none';
+            aiFirstSelectionScreen.style.display = 'none'; // Ensure this is hidden
+            gameArea.style.display = 'block';
+            initializeBoard();
+        }
+
+        function showModeSelection() { // Called by "返回主菜单" button
+            gameArea.style.display = 'none';
+            aiFirstSelectionScreen.style.display = 'none';
+            modeSelectionScreen.style.display = 'block';
+        }
+
+        // --- Board Initialization and Rendering ---
+        function initializeBoard() {
+            board = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
+            gameOver = false;
+            moveHistory = [];
+            
+            let initialMessage = "";
+            if (gameMode === 'pvai') {
+                if (aiStartsFirst) {
+                    currentPlayer = AI_PLAYER;
+                    initialMessage = `AI (蓝棋) 先手`;
+                } else {
+                    currentPlayer = 1; // Human player
+                    initialMessage = `玩家 1 (红棋) 先手`;
+                }
+            } else { // pvp
+                currentPlayer = 1;
+                initialMessage = `轮到玩家 1 (红棋)`;
+            }
+            
+            updateMessage(initialMessage);
+            renderBoard();
+            updateUndoButtonState();
+
+            // If AI is the current player and game is not over, AI makes the first move
+            if (gameMode === 'pvai' && currentPlayer === AI_PLAYER && !gameOver) {
+                gameBoardElement.style.pointerEvents = 'none';
+                // Update message to indicate AI is thinking for its first move
+                // This message will be overridden by makeAIMove's own "thinking" message, which is fine.
+                // Or, we can set a specific first move thinking message here.
+                updateMessage('AI (蓝棋) 正在准备第一步...'); 
+                setTimeout(() => {
+                    makeAIMove(); // makeAIMove itself has a thinking message
+                    gameBoardElement.style.pointerEvents = 'auto';
+                }, 800 + Math.random() * 500); // Slightly longer initial "thinking"
+            }
+        }
+
+        function renderBoard() {
+            gameBoardElement.innerHTML = ''; 
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    if (board[r][c] === 1) cell.classList.add('player1');
+                    else if (board[r][c] === 2) cell.classList.add('player2');
+                    cell.addEventListener('click', handleCellClick);
+                    gameBoardElement.appendChild(cell);
+                }
+            }
+        }
+
+        // --- Game Logic ---
+        function handleCellClick(event) {
+            if (gameOver) return;
+            if (gameMode === 'pvai' && currentPlayer === AI_PLAYER) return; 
+
+            const row = parseInt(event.target.dataset.row);
+            const col = parseInt(event.target.dataset.col);
+
+            if (board[row][col] === 0) { 
+                makeMove(row, col, currentPlayer);
+            }
+        }
+
+        function makeMove(row, col, player) {
+            if (board[row][col] !== 0 || gameOver) return; 
+
+            board[row][col] = player;
+            moveHistory.push({ row, col, player }); 
+
+            const cellElement = gameBoardElement.querySelector(`.cell[data-row='${row}'][data-col='${col}']`);
+            if (cellElement) {
+                 cellElement.classList.remove('player1', 'player2'); 
+                 if (player === 1) cellElement.classList.add('player1');
+                 else if (player === 2) cellElement.classList.add('player2');
+            }
+
+            if (checkWin(row, col, player, board)) {
+                gameOver = true;
+                updateMessage(`玩家 ${player} ( ${player === 1 ? '红棋' : '蓝棋'} ) 胜利! 🎉`);
+            } else if (board.every(r_arr => r_arr.every(cellValue => cellValue !== 0))) { 
+                gameOver = true;
+                updateMessage('平局! 🤝');
+            } else { 
+                currentPlayer = player === 1 ? 2 : 1; 
+                updateMessage(`轮到玩家 ${currentPlayer} ( ${currentPlayer === 1 ? '红棋' : '蓝棋'} )`);
+                if (gameMode === 'pvai' && currentPlayer === AI_PLAYER && !gameOver) {
+                    gameBoardElement.style.pointerEvents = 'none'; 
+                    setTimeout(() => {
+                        makeAIMove();
+                        gameBoardElement.style.pointerEvents = 'auto'; 
+                    }, 500 + Math.random() * 500); 
+                }
+            }
+            updateUndoButtonState(); 
+        }
+        
+        function checkWin(r, c, player, currentBoard) {
+            const directions = [[0, 1], [1, 0], [1, 1], [1, -1]]; 
+            for (const [dr, dc] of directions) {
+                let count = 1; 
+                for (let i = 1; i < CONNECT_N; i++) { 
+                    const nr = r + dr * i;
+                    const nc = c + dc * i;
+                    if (isValid(nr, nc) && currentBoard[nr][nc] === player) count++;
+                    else break;
+                }
+                for (let i = 1; i < CONNECT_N; i++) { 
+                    const nr = r - dr * i;
+                    const nc = c - dc * i;
+                    if (isValid(nr, nc) && currentBoard[nr][nc] === player) count++;
+                    else break;
+                }
+                if (count >= CONNECT_N) return true; 
+            }
+            return false;
+        }
+
+        function isValid(r, c) {
+            return r >= 0 && r < ROWS && c >= 0 && c < COLS;
+        }
+
+        // --- AI Logic (largely unchanged from previous version) ---
+        function makeAIMove() {
+            if (gameOver) return;
+            updateMessage('AI (蓝棋) 正在思考...'); // Standard thinking message
+
+            const bestMove = findBestMove(); 
+            if (bestMove) {
+                setTimeout(() => { 
+                     makeMove(bestMove.r, bestMove.c, AI_PLAYER);
+                }, 200);
+            } else {
+                 console.warn("AI couldn't find a strategic move or board is full.");
+                 const availableSpots = [];
+                 for (let r_idx = 0; r_idx < ROWS; r_idx++) {
+                    for (let c_idx = 0; c_idx < COLS; c_idx++) {
+                        if (board[r_idx][c_idx] === 0) {
+                            availableSpots.push({ r: r_idx, c: c_idx });
+                        }
+                    }
+                 }
+                 if (availableSpots.length > 0) {
+                    const randomFallbackMove = availableSpots[Math.floor(Math.random() * availableSpots.length)];
+                    makeMove(randomFallbackMove.r, randomFallbackMove.c, AI_PLAYER);
+                 }
+            }
+        }
+
+        function findWinningMove(player) {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] === 0) { 
+                        board[r][c] = player; 
+                        if (checkWin(r, c, player, board)) {
+                            board[r][c] = 0; 
+                            return { r, c }; 
+                        }
+                        board[r][c] = 0; 
+                    }
+                }
+            }
+            return null; 
+        }
+        
+        function findForcingMove(player, targetCount) {
+            for (let r_move = 0; r_move < ROWS; r_move++) {
+                for (let c_move = 0; c_move < COLS; c_move++) {
+                    if (board[r_move][c_move] === 0) { 
+                        board[r_move][c_move] = player; 
+
+                        const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+                        for (const [dr, dc] of directions) {
+                            let lineLength = 1;
+                            let winSpot1 = null, winSpot2 = null;
+
+                            for (let i = 1; i < CONNECT_N; i++) {
+                                const nr = r_move + dr * i;
+                                const nc = c_move + dc * i;
+                                if (isValid(nr, nc) && board[nr][nc] === player) lineLength++;
+                                else if (isValid(nr, nc) && board[nr][nc] === 0) { winSpot1 = {r: nr, c: nc}; break; }
+                                else break; 
+                            }
+                            for (let i = 1; i < CONNECT_N; i++) {
+                                const nr = r_move - dr * i;
+                                const nc = c_move - dc * i;
+                                if (isValid(nr, nc) && board[nr][nc] === player) lineLength++;
+                                else if (isValid(nr, nc) && board[nr][nc] === 0) { winSpot2 = {r: nr, c: nc}; break; }
+                                else break;
+                            }
+                            
+                            if (lineLength === targetCount) {
+                                if (targetCount + 1 === CONNECT_N) { 
+                                    if (winSpot1 || winSpot2) { 
+                                         board[r_move][c_move] = 0; 
+                                         return { r: r_move, c: c_move };
+                                    }
+                                }
+                            }
+                        }
+                        board[r_move][c_move] = 0; 
+                    }
+                }
+            }
+            return null;
+        }
+        
+        function findDoubleThreatMove(player) {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] === 0) { 
+                        board[r][c] = player; 
+                        
+                        let winningOpportunities = 0;
+                        const foundWinSpots = []; 
+
+                        for (let nr_next = 0; nr_next < ROWS; nr_next++) {
+                            for (let nc_next = 0; nc_next < COLS; nc_next++) {
+                                if (board[nr_next][nc_next] === 0) { 
+                                    board[nr_next][nc_next] = player; 
+                                    if (checkWin(nr_next, nc_next, player, board)) {
+                                        if (!foundWinSpots.some(spot => spot.r === nr_next && spot.c === nc_next)) {
+                                            winningOpportunities++;
+                                            foundWinSpots.push({r: nr_next, c: nc_next});
+                                        }
+                                    }
+                                    board[nr_next][nc_next] = 0; 
+                                    if (winningOpportunities >= 2) break; 
+                                }
+                            }
+                            if (winningOpportunities >= 2) break;
+                        }
+                        
+                        board[r][c] = 0; 
+
+                        if (winningOpportunities >= 2) {
+                            return { r, c }; 
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        function findBestMove() {
+            const humanPlayer = AI_PLAYER === 1 ? 2 : 1;
+            let move;
+
+            move = findWinningMove(AI_PLAYER);
+            if (move) { console.log("AI 决策: Tier 1 - 直接获胜"); return move; }
+
+            move = findWinningMove(humanPlayer);
+            if (move) { console.log("AI 决策: Tier 2 - 阻止玩家获胜"); return move; }
+
+            move = findDoubleThreatMove(AI_PLAYER);
+            if (move) { console.log("AI 决策: Tier 3 - 制造双重威胁 (AI)"); return move; }
+
+            move = findDoubleThreatMove(humanPlayer);
+            if (move) { console.log("AI 决策: Tier 4 - 阻止双重威胁 (玩家)"); return move; }
+
+            move = findForcingMove(AI_PLAYER, CONNECT_N - 1);
+            if (move) { console.log("AI 决策: Tier 5 - 制造活三 (AI)"); return move; }
+
+            move = findForcingMove(humanPlayer, CONNECT_N - 1);
+            if (move) { console.log("AI 决策: Tier 6 - 阻止活三 (玩家)"); return move; }
+            
+            move = findForcingMove(AI_PLAYER, CONNECT_N - 2);
+            if (move) { console.log("AI 决策: Tier 7 - 制造活二 (AI)"); return move; }
+
+            move = findForcingMove(humanPlayer, CONNECT_N - 2);
+            if (move) { console.log("AI 决策: Tier 8 - 阻止活二 (玩家)"); return move; }
+            
+            const availableSpots = [];
+            for (let r_idx = 0; r_idx < ROWS; r_idx++) {
+                for (let c_idx = 0; c_idx < COLS; c_idx++) {
+                    if (board[r_idx][c_idx] === 0) {
+                        availableSpots.push({ r: r_idx, c: c_idx });
+                    }
+                }
+            }
+
+            if (availableSpots.length > 0) {
+                const centerColsStart = Math.max(0, Math.floor(COLS / 2) - 3); 
+                const centerColsEnd = Math.min(COLS - 1, Math.ceil(COLS / 2) + 2); 
+                
+                const centerSpots = availableSpots.filter(spot => spot.c >= centerColsStart && spot.c <= centerColsEnd);
+                if (centerSpots.length > 0) {
+                    console.log("AI 决策: Tier 9 - 落子于中间区域");
+                    return centerSpots[Math.floor(Math.random() * centerSpots.length)];
+                }
+                console.log("AI 决策: Tier 10 - 随机落子 (无中间空位)");
+                return availableSpots[Math.floor(Math.random() * availableSpots.length)];
+            }
+            console.log("AI 决策: 无可用棋步。"); 
+            return null; 
+        }
+
+
+        // --- UI Updates and Controls ---
+        function updateMessage(msg) {
+            messageElement.textContent = msg;
+        }
+
+        function updateUndoButtonState() {
+            undoButton.disabled = gameOver || moveHistory.length === 0;
+        }
+
+        function handleUndoClick() {
+            if (moveHistory.length === 0) return; 
+            
+            const lastMove = moveHistory.pop(); 
+            if (lastMove) {
+                board[lastMove.row][lastMove.col] = 0; 
+                
+                const cellToUndo = gameBoardElement.querySelector(`.cell[data-row='${lastMove.row}'][data-col='${lastMove.col}']`);
+                if (cellToUndo) {
+                    cellToUndo.classList.remove('player1', 'player2');
+                }
+
+                currentPlayer = lastMove.player; 
+                const prevGameOverState = gameOver; 
+                gameOver = false; 
+                updateMessage(`轮到玩家 ${currentPlayer} ( ${currentPlayer === 1 ? '红棋' : '蓝棋'} )`);
+                
+                if (gameMode === 'pvai' && currentPlayer === AI_PLAYER && !gameOver) {
+                     console.log("悔棋导致轮到AI，触发AI行动。");
+                     gameBoardElement.style.pointerEvents = 'none'; 
+                     setTimeout(() => {
+                        makeAIMove();
+                        gameBoardElement.style.pointerEvents = 'auto'; 
+                    }, 500 + Math.random() * 500);
+                } else if (gameMode === 'pvai' && currentPlayer !== AI_PLAYER && prevGameOverState && !gameOver) {
+                    console.log("悔棋撤销了AI的胜利，现在轮到玩家。");
+                }
+            }
+            updateUndoButtonState(); 
+        }
+
+        // Event Listeners
+        resetButton.addEventListener('click', showModeSelection); 
+        undoButton.addEventListener('click', handleUndoClick);
+        restartCurrentGameButton.addEventListener('click', initializeBoard); // New button listener
+
+        // Initial Setup: Show mode selection screen
+        showModeSelection();
+    </script>
+</body>
+</html>
