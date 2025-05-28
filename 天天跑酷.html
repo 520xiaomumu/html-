@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>跑酷小英雄-恐龙版</title>
+    <style>
+        /* 基本重置和页面设置 */
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #6dd5ed, #2193b0); /* 清新科技感渐变 */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* 现代字体 */
+            color: #fff;
+            overflow: hidden; /* 防止游戏外的滚动条 */
+            text-align: center;
+        }
+
+        h1 {
+            color: #fff;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            margin-bottom: 15px;
+            font-size: 2.5em;
+        }
+
+        /* 游戏容器样式 */
+        .game-container {
+            width: 90%;
+            max-width: 700px;
+            height: 350px;
+            background-color: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25);
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        /* 玩家样式 */
+        .player {
+            width: 50px;
+            height: 50px;
+            position: absolute;
+            bottom: 10px;
+            left: 60px;
+            box-shadow: 0 5px 10px rgba(0,0,0,0.2);
+        }
+        .dino-svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+
+        /* 障碍物样式 */
+        .obstacle {
+            position: absolute;
+            bottom: 10px;
+            right: -50px;
+            box-shadow: 0 5px 10px rgba(0,0,0,0.15);
+        }
+
+        /* 分数板样式 */
+        .score-board {
+            position: absolute;
+            top: 20px;
+            right: 25px;
+            font-size: 28px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.4);
+        }
+
+        /* 地面样式 */
+        .ground {
+            width: 100%;
+            height: 10px;
+            background-image: linear-gradient(to right, #86A8E7, #7F7FD5, #86A8E7);
+            background-size: 50px 100%; /* 调整这个值可以改变条纹的密度 */
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            animation: ground-slide 0.5s linear infinite; /* 基础动画速度调整 */
+        }
+
+        @keyframes ground-slide {
+            0% { background-position-x: 0; }
+            100% { background-position-x: -50px; } /* 对应background-size的宽度 */
+        }
+
+        /* 提示信息样式 */
+        .instructions {
+            font-size: 1em;
+            color: #f0f0f0;
+            margin-top: 10px;
+            padding: 0 15px;
+            max-width: 600px;
+            line-height: 1.6;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+        }
+
+        .start-message, .game-over-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #333;
+            background-color: rgba(255, 255, 255, 0.92);
+            padding: 30px 40px;
+            border-radius: 15px;
+            text-align: center;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+            z-index: 10;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .game-over-message .status {
+            font-size: 2.2em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #d32f2f;
+            white-space: nowrap; /* 确保文本在同一行显示 */
+        }
+
+        .game-over-message .final-score-text {
+            font-size: 1.3em;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        .game-over-message #finalScore {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .game-over-message .restart-prompt {
+            font-size: 0.9em;
+            color: #777;
+        }
+
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            h1 { font-size: 2em; }
+            .game-container { height: 300px; max-width: 95%; }
+            .player { width: 45px; height: 45px; left: 40px; }
+            .score-board { font-size: 24px; top: 15px; right: 20px; }
+            .start-message, .game-over-message { padding: 25px 30px; }
+            .game-over-message .status { font-size: 2em; margin-bottom: 12px; }
+            .game-over-message .final-score-text { font-size: 1.2em; }
+            .game-over-message #finalScore { font-size: 1.6em; margin-bottom: 15px; }
+            .game-over-message .restart-prompt { font-size: 0.85em; }
+            .instructions { font-size: 0.9em; }
+        }
+
+        @media (max-width: 480px) {
+            h1 { font-size: 1.8em; }
+            .game-container { height: 250px; }
+            .player { width: 40px; height: 40px; left: 30px; }
+            .score-board { font-size: 20px; top: 10px; right: 15px; }
+            .start-message, .game-over-message { padding: 20px 25px; }
+            .game-over-message .status { font-size: 1.6em; margin-bottom: 10px; }
+            .game-over-message .final-score-text { font-size: 1.1em; }
+            .game-over-message #finalScore { font-size: 1.4em; margin-bottom: 12px; }
+            .game-over-message .restart-prompt { font-size: 0.8em; }
+            .instructions { font-size: 0.85em; }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>跑酷小英雄</h1>
+
+    <div class="game-container" id="gameContainer">
+        <div class="player" id="player">
+            <svg viewBox="0 0 50 50" class="dino-svg" fill="#4CAF50"> <rect x="15" y="5" width="25" height="15" rx="3"/> <rect x="5" y="15" width="30" height="25" rx="3" fill="#66BB6A"/> <rect x="8" y="40" width="10" height="10" rx="2"/> <rect x="22" y="40" width="10" height="10" rx="2"/> <rect x="30" y="18" width="15" height="8" rx="2" fill="#66BB6A"/> <circle cx="32" cy="12" r="2" fill="white"/> <circle cx="33" cy="12" r="1" fill="black"/> <rect x="3" y="25" width="5" height="5" rx="1" fill="#66BB6A"/> </svg>
+        </div>
+        <div class="ground" id="ground"></div>
+        <div class="score-board" id="scoreBoard">分数: 0</div>
+        <div class="start-message" id="startMessage">点击或按空格键开始</div>
+        <div class="game-over-message" id="gameOverMessage" style="display: none;">
+            <div class="status">游戏结束</div> <div class="final-score-text">最终得分:</div>
+            <div id="finalScore">0</div>
+            <div class="restart-prompt"><small>点击或按空格重新开始</small></div>
+        </div>
+    </div>
+
+    <div class="instructions">
+        <strong>玩法：</strong>按空格或点/触屏幕跳跃，躲避障碍！
+    </div>
+
+    <script>
+        const gameContainer = document.getElementById('gameContainer');
+        const player = document.getElementById('player');
+        const scoreBoard = document.getElementById('scoreBoard');
+        const startMessage = document.getElementById('startMessage');
+        const gameOverMessage = document.getElementById('gameOverMessage');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const ground = document.getElementById('ground');
+
+        // 游戏参数
+        let score = 0;
+        let obstacleIntervalId;
+        let difficultyIncreaseIntervalId;
+
+        let isJumping = false;
+        let gameStarted = false;
+        let obstacles = [];
+
+        // 物理参数
+        let playerVelocityY = 0;
+        const gravity = 0.8;
+        const jumpForce = 18;
+        const playerBottomInitial = 10;
+        let playerBottom = playerBottomInitial;
+
+        // 游戏动态参数
+        let gameSpeed = 5;
+        const initialGameSpeed = 5;
+        const gameSpeedIncrement = 0.2;
+        const gameSpeedIncreaseInterval = 10000;
+
+        let obstacleSpawnRate = 2200;
+        const initialObstacleSpawnRate = 2200;
+        const minObstacleSpawnRate = 900;
+        const obstacleSpawnRateDecrement = 70;
+
+        // 更新分数显示
+        function updateScoreDisplay() {
+            scoreBoard.textContent = `分数: ${score}`;
+        }
+
+        // 玩家跳跃
+        function jump() {
+            if (!isJumping && gameStarted) {
+                isJumping = true;
+                playerVelocityY = jumpForce;
+            }
+        }
+
+        // 创建障碍物
+        function createObstacle() {
+            if (!gameStarted) return;
+
+            const obstacle = document.createElement('div');
+            obstacle.classList.add('obstacle');
+
+            const obstacleType = Math.floor(Math.random() * 4);
+            let obstacleWidth, obstacleHeight;
+            let obstacleColor = "linear-gradient(to top, #434343, #000000)";
+            let borderRadius = "8px";
+
+            switch (obstacleType) {
+                case 0: // 高仙人掌
+                    obstacleWidth = Math.random() * 10 + 20;
+                    obstacleHeight = Math.random() * 30 + 60;
+                    obstacleColor = "linear-gradient(to top, #2E7D32, #1B5E20)";
+                    borderRadius = "6px 6px 0 0";
+                    break;
+                case 1: // 短而宽的岩石
+                    obstacleWidth = Math.random() * 25 + 35;
+                    obstacleHeight = Math.random() * 20 + 25;
+                    obstacleColor = "linear-gradient(to top, #795548, #5D4037)";
+                    borderRadius = "15px";
+                    break;
+                case 2: // 双重矮障碍
+                    obstacleWidth = (Math.random() * 10 + 15) * 2 + 5;
+                    obstacleHeight = Math.random() * 15 + 20;
+                    obstacle.style.background = "transparent";
+                    obstacle.style.boxShadow = "none";
+
+                    let block1 = document.createElement('div');
+                    block1.style.width = `${(obstacleWidth - 5)/2}px`;
+                    block1.style.height = `${obstacleHeight}px`;
+                    block1.style.background = "linear-gradient(to top, #607D8B, #455A64)";
+                    block1.style.borderRadius = "5px";
+                    block1.style.position = "absolute";
+                    block1.style.left = "0";
+                    block1.style.bottom = "0";
+                    block1.style.boxShadow = "0 3px 6px rgba(0,0,0,0.1)";
+                    obstacle.appendChild(block1);
+
+                    let block2 = document.createElement('div');
+                    block2.style.width = `${(obstacleWidth - 5)/2}px`;
+                    block2.style.height = `${obstacleHeight}px`;
+                    block2.style.background = "linear-gradient(to top, #607D8B, #455A64)";
+                    block2.style.borderRadius = "5px";
+                    block2.style.position = "absolute";
+                    block2.style.right = "0";
+                    block2.style.bottom = "0";
+                    block2.style.boxShadow = "0 3px 6px rgba(0,0,0,0.1)";
+                    obstacle.appendChild(block2);
+                    break;
+                case 3: // 默认黑色方块
+                default:
+                    obstacleWidth = Math.random() * 15 + 20;
+                    obstacleHeight = Math.random() * 35 + 35;
+                    obstacleColor = "linear-gradient(to top, #37474F, #263238)";
+                    borderRadius = "5px";
+                    break;
+            }
+            obstacle.style.width = `${obstacleWidth}px`;
+            obstacle.style.height = `${obstacleHeight}px`;
+            if(obstacleType !== 2) {
+                 obstacle.style.background = obstacleColor;
+            }
+            obstacle.style.borderRadius = borderRadius;
+
+
+            obstacle.style.right = `-${obstacleWidth + 10}px`;
+            gameContainer.appendChild(obstacle);
+            obstacles.push(obstacle);
+        }
+
+        // 移动元素
+        function moveElements() {
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obstacle = obstacles[i];
+                let obstacleRight = parseFloat(obstacle.style.right);
+                obstacleRight += gameSpeed;
+                obstacle.style.right = `${obstacleRight}px`;
+
+                if (obstacleRight > gameContainer.offsetWidth) {
+                    obstacle.remove();
+                    obstacles.splice(i, 1);
+                    score++;
+                    updateScoreDisplay();
+                }
+            }
+            // 调整地面动画速度，使其更快
+            // 原来是 10 / gameSpeed，改为 5 / gameSpeed 或更小的值会让它更快
+            // 同时CSS中设置一个较快的基础速度 animation: ground-slide 0.5s linear infinite;
+            // JS中的调整将基于这个更快的CSS基础速度
+            // 如果CSS中是0.5s, 那么 gameSpeed为5时，持续时间为 1s (0.5 * (initialGameSpeed / gameSpeed) * 2)
+            // 为了简化，让JS直接控制动画速度的倍数关系
+            // CSS中设置一个基础值，例如 ground.style.animationDuration = (1 / gameSpeed) * 2.5 + 's';
+            // 或者更直接地，让CSS的动画速度较快，JS中不再除以一个大数
+            ground.style.animationDuration = `${5 / gameSpeed}s`; // 使地面滚动更快
+        }
+
+        // 碰撞检测
+        function checkCollision() {
+            const playerRect = player.getBoundingClientRect();
+            for (let obstacle of obstacles) {
+                if (obstacle.children.length > 0 && obstacle.style.background === "transparent") {
+                    for(let child of obstacle.children){
+                        const childRect = child.getBoundingClientRect();
+                         if (
+                            playerRect.left < childRect.right &&
+                            playerRect.right > childRect.left &&
+                            playerRect.top < childRect.bottom &&
+                            playerRect.bottom > childRect.top
+                        ) {
+                            return true;
+                        }
+                    }
+                } else {
+                    const obstacleRect = obstacle.getBoundingClientRect();
+                    if (
+                        playerRect.left < obstacleRect.right &&
+                        playerRect.right > obstacleRect.left &&
+                        playerRect.top < obstacleRect.bottom &&
+                        playerRect.bottom > obstacleRect.top
+                    ) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // 游戏主循环
+        function gameLoop() {
+            if (!gameStarted) return;
+
+            playerVelocityY -= gravity;
+            playerBottom += playerVelocityY;
+
+            if (playerBottom <= playerBottomInitial) {
+                playerBottom = playerBottomInitial;
+                playerVelocityY = 0;
+                isJumping = false;
+            }
+            player.style.bottom = `${playerBottom}px`;
+
+            moveElements();
+
+            if (checkCollision()) {
+                endGame();
+                return;
+            }
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 增加游戏难度
+        function increaseDifficulty() {
+            gameSpeed += gameSpeedIncrement;
+            obstacleSpawnRate = Math.max(minObstacleSpawnRate, obstacleSpawnRate - obstacleSpawnRateDecrement);
+
+            clearInterval(obstacleIntervalId);
+            obstacleIntervalId = setInterval(createObstacle, obstacleSpawnRate);
+        }
+
+        // 开始游戏
+        function startGame() {
+            if (gameStarted) return;
+            gameStarted = true;
+
+            score = 0;
+            updateScoreDisplay();
+            playerBottom = playerBottomInitial;
+            player.style.bottom = `${playerBottom}px`;
+            isJumping = false;
+            playerVelocityY = 0;
+            gameSpeed = initialGameSpeed;
+            obstacleSpawnRate = initialObstacleSpawnRate;
+
+            startMessage.style.display = 'none';
+            gameOverMessage.style.display = 'none';
+            gameOverMessage.style.opacity = '0';
+            gameOverMessage.style.transform = 'translate(-50%, -60%)';
+
+            obstacles.forEach(obstacle => obstacle.remove());
+            obstacles = [];
+
+            requestAnimationFrame(gameLoop);
+            obstacleIntervalId = setInterval(createObstacle, obstacleSpawnRate);
+            difficultyIncreaseIntervalId = setInterval(increaseDifficulty, gameSpeedIncreaseInterval);
+            ground.style.animationDuration = `${5 / initialGameSpeed}s`; // 初始化地面动画速度
+        }
+
+        // 结束游戏
+        function endGame() {
+            gameStarted = false;
+            clearInterval(obstacleIntervalId);
+            clearInterval(difficultyIncreaseIntervalId);
+
+            finalScoreDisplay.textContent = score;
+            gameOverMessage.style.display = 'flex';
+            setTimeout(() => {
+                gameOverMessage.style.opacity = '1';
+                gameOverMessage.style.transform = 'translate(-50%, -50%)';
+            }, 50);
+
+            gameContainer.style.animation = 'shake 0.3s';
+            setTimeout(() => gameContainer.style.animation = '', 300);
+        }
+
+        const styleSheet = document.createElement("style");
+        styleSheet.type = "text/css";
+        styleSheet.innerText = `
+            @keyframes shake {
+                0%, 100% { transform: translateX(0); }
+                25% { transform: translateX(-5px); }
+                50% { transform: translateX(5px); }
+                75% { transform: translateX(-3px); }
+            }
+        `;
+        document.head.appendChild(styleSheet);
+
+        // 事件监听器
+        function handleUserInput(event) {
+            if (event.type === 'keydown' && event.code === 'Space' || event.type === 'mousedown' || event.type === 'touchstart') {
+                 event.preventDefault();
+            }
+
+            if (!gameStarted) {
+                startGame();
+            } else {
+                jump();
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') handleUserInput(e);
+        });
+        gameContainer.addEventListener('mousedown', handleUserInput);
+        gameContainer.addEventListener('touchstart', handleUserInput, { passive: false });
+
+        // 初始化显示
+        startMessage.style.display = 'flex';
+        startMessage.style.opacity = '1';
+        startMessage.style.transform = 'translate(-50%, -50%)';
+
+    </script>
+</body>
+</html>

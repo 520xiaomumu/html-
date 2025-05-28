@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>四子棋游戏</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f4f8; /* Tailwind bg-slate-100 */
+            color: #334155; /* Tailwind text-slate-700 */
+        }
+        .game-container {
+            background-color: #ffffff; /* Tailwind bg-white */
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            text-align: center;
+        }
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(20, 30px); /* 20列 */
+            grid-template-rows: repeat(4, 30px);    /* 4行 */
+            gap: 4px;
+            margin: 20px auto;
+            border: 2px solid #94a3b8; /* Tailwind border-slate-400 */
+            padding: 5px;
+            background-color: #e2e8f0; /* Tailwind bg-slate-200 */
+            border-radius: 8px;
+            width: fit-content; /* 让棋盘根据内容自适应宽度 */
+            max-width: 100%;
+            overflow-x: auto; /* 如果棋盘太宽，允许水平滚动 */
+        }
+        .cell {
+            width: 30px;
+            height: 30px;
+            background-color: #cbd5e1; /* Tailwind bg-slate-300 */
+            border: 1px solid #94a3b8; /* Tailwind border-slate-400 */
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        .cell:hover {
+            background-color: #94a3b8; /* Tailwind bg-slate-400 */
+            transform: scale(1.05);
+        }
+        .cell.player1 {
+            background-color: #ef4444; /* Tailwind bg-red-500 */
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.3);
+        }
+        .cell.player2 {
+            background-color: #3b82f6; /* Tailwind bg-blue-500 */
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.3);
+        }
+        .message-area {
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            min-height: 2em; /* 确保消息区域有固定高度，防止按钮跳动 */
+        }
+        .button-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px; /* 按钮之间的间距 */
+            margin-top: 15px;
+        }
+        .game-button {
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s ease, opacity 0.3s ease;
+        }
+        .game-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #reset-button {
+            background-color: #10b981; /* Tailwind bg-emerald-500 */
+        }
+        #reset-button:hover:not(:disabled) {
+            background-color: #059669; /* Tailwind bg-emerald-600 */
+        }
+        #undo-button {
+            background-color: #f97316; /* Tailwind bg-orange-500 */
+        }
+        #undo-button:hover:not(:disabled) {
+            background-color: #ea580c; /* Tailwind bg-orange-600 */
+        }
+
+
+        /* 响应式调整 */
+        @media (max-width: 700px) { /* 20 * 30px (cell) + 19 * 4px (gap) + 10px (padding) + 4px (border) ~= 690px */
+            #game-board {
+                grid-template-columns: repeat(20, 25px);
+                grid-template-rows: repeat(4, 25px);
+                gap: 3px;
+            }
+            .cell {
+                width: 25px;
+                height: 25px;
+            }
+        }
+        @media (max-width: 580px) {
+             #game-board {
+                grid-template-columns: repeat(20, 20px);
+                grid-template-rows: repeat(4, 20px);
+                gap: 2px;
+            }
+            .cell {
+                width: 20px;
+                height: 20px;
+            }
+            .game-container {
+                padding: 15px;
+            }
+            .message-area {
+                font-size: 1rem;
+            }
+            .game-button {
+                padding: 8px 16px;
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1 class="text-2xl font-bold mb-4 text-slate-800">四子棋游戏 (4x20)</h1>
+        <div id="message" class="message-area">轮到玩家 1 (红棋)</div>
+        <div id="game-board"></div>
+        <div class="button-container">
+            <button id="undo-button" class="game-button">悔棋</button>
+            <button id="reset-button" class="game-button">重新开始</button>
+        </div>
+    </div>
+
+    <script>
+        const ROWS = 4;
+        const COLS = 20;
+        const CONNECT_N = 4; // 需要连接的棋子数
+
+        let board = [];
+        let currentPlayer = 1; // 1 for Player 1 (Red), 2 for Player 2 (Blue)
+        let gameOver = false;
+        let moveHistory = []; // 用于存储每一步棋 {row, col, player}
+
+        const gameBoardElement = document.getElementById('game-board');
+        const messageElement = document.getElementById('message');
+        const resetButton = document.getElementById('reset-button');
+        const undoButton = document.getElementById('undo-button');
+
+        // 初始化棋盘
+        function initializeBoard() {
+            board = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
+            currentPlayer = 1;
+            gameOver = false;
+            moveHistory = []; // 清空历史记录
+            renderBoard();
+            updateMessage(`轮到玩家 1 (红棋)`);
+            updateUndoButtonState(); // 更新悔棋按钮状态
+        }
+
+        // 渲染棋盘
+        function renderBoard() {
+            gameBoardElement.innerHTML = ''; // 清空旧棋盘
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    if (board[r][c] === 1) {
+                        cell.classList.add('player1');
+                    } else if (board[r][c] === 2) {
+                        cell.classList.add('player2');
+                    }
+                    cell.addEventListener('click', handleCellClick);
+                    gameBoardElement.appendChild(cell);
+                }
+            }
+        }
+
+        // 更新消息
+        function updateMessage(msg) {
+            messageElement.textContent = msg;
+        }
+
+        // 更新悔棋按钮状态
+        function updateUndoButtonState() {
+            undoButton.disabled = gameOver || moveHistory.length === 0;
+        }
+
+        // 处理单元格点击
+        function handleCellClick(event) {
+            if (gameOver) return;
+
+            const row = parseInt(event.target.dataset.row);
+            const col = parseInt(event.target.dataset.col);
+
+            if (board[row][col] === 0) { // 如果单元格为空
+                // 记录当前状态以便悔棋
+                moveHistory.push({ row, col, player: currentPlayer });
+
+                board[row][col] = currentPlayer;
+                // 直接通过 board[row][col] 来获取单元格并更新，避免依赖 event.target
+                const clickedCell = gameBoardElement.querySelector(`.cell[data-row='${row}'][data-col='${col}']`);
+                if (clickedCell) {
+                    clickedCell.classList.add(currentPlayer === 1 ? 'player1' : 'player2');
+                }
+                
+                if (checkWin(row, col)) {
+                    gameOver = true;
+                    updateMessage(`玩家 ${currentPlayer} ( ${currentPlayer === 1 ? '红棋' : '蓝棋'} ) 胜利! 🎉`);
+                } else if (board.every(r => r.every(cellValue => cellValue !== 0))) { // 检查是否平局
+                    gameOver = true;
+                    updateMessage('平局! 🤝');
+                } else {
+                    currentPlayer = currentPlayer === 1 ? 2 : 1;
+                    updateMessage(`轮到玩家 ${currentPlayer} ( ${currentPlayer === 1 ? '红棋' : '蓝棋'} )`);
+                }
+                updateUndoButtonState(); // 更新悔棋按钮状态
+            }
+        }
+
+        // 处理悔棋点击
+        function handleUndoClick() {
+            if (gameOver || moveHistory.length === 0) return;
+
+            const lastMove = moveHistory.pop();
+            if (lastMove) {
+                board[lastMove.row][lastMove.col] = 0; // 清除棋盘上的棋子
+                
+                // 更新单元格显示
+                const cellToUndo = gameBoardElement.querySelector(`.cell[data-row='${lastMove.row}'][data-col='${lastMove.col}']`);
+                if (cellToUndo) {
+                    cellToUndo.classList.remove('player1', 'player2');
+                }
+
+                currentPlayer = lastMove.player; // 切换回上一个玩家
+                gameOver = false; // 如果游戏因为这一步结束了，悔棋后游戏继续
+                updateMessage(`轮到玩家 ${currentPlayer} ( ${currentPlayer === 1 ? '红棋' : '蓝棋'} )`);
+            }
+            updateUndoButtonState(); // 更新悔棋按钮状态
+        }
+
+
+        // 检查胜利条件
+        function checkWin(r, c) {
+            const player = board[r][c];
+
+            // 检查方向数组: [行变化, 列变化]
+            const directions = [
+                [0, 1],  // 水平
+                [1, 0],  // 垂直
+                [1, 1],  // 右下斜线 (\)
+                [1, -1]  // 左下斜线 (/)
+            ];
+
+            for (const [dr, dc] of directions) {
+                let count = 1; // 包括当前棋子
+
+                // 检查一个方向
+                for (let i = 1; i < CONNECT_N; i++) {
+                    const nr = r + dr * i;
+                    const nc = c + dc * i;
+                    if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && board[nr][nc] === player) {
+                        count++;
+                    } else {
+                        break;
+                    }
+                }
+
+                // 检查相反方向
+                for (let i = 1; i < CONNECT_N; i++) {
+                    const nr = r - dr * i;
+                    const nc = c - dc * i;
+                     if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && board[nr][nc] === player) {
+                        count++;
+                    } else {
+                        break;
+                    }
+                }
+                if (count >= CONNECT_N) return true;
+            }
+            return false;
+        }
+
+        // 绑定事件监听器
+        resetButton.addEventListener('click', initializeBoard);
+        undoButton.addEventListener('click', handleUndoClick);
+
+        // 初始加载
+        initializeBoard();
+    </script>
+</body>
+</html>

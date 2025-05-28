@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中国象棋</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --board-bg: #F0D9B5; /* Light wood color */
+            --line-color: #6A4F4B; /* Dark brown for lines */
+            --red-piece-text-color: #E53E3E; /* Red text for Red pieces */
+            --black-piece-text-color: #1A202C; /* Dark Gray/Black text for Black pieces - made it darker */
+            --selected-bg: rgba(66, 153, 225, 0.4); /* Light sky blue transparent for selection overlay */
+            --valid-move-bg: rgba(72, 187, 120, 0.6); /* Light green transparent for valid moves */
+            --piece-font-size-sm: 18px; /* Slightly smaller for small screens */
+            --piece-font-size-md: 26px; /* Adjusted for better fit in piece */
+            --cell-size-sm: 36px;
+            --cell-size-md: 48px;
+
+            /* New variables for piece styling */
+            --red-piece-bg-color: #FEE2E2; /* Lighter red for background of red pieces */
+            --red-piece-border-color: #DC2626; /* A strong red for border of red pieces */
+            --black-piece-bg-color: #E5E7EB; /* Lighter gray for background of black pieces */
+            --black-piece-border-color: #374151; /* A strong dark gray for border of black pieces */
+            --piece-shadow-style: 0 2px 3px rgba(0,0,0,0.15), inset 0 1px 1px rgba(255,255,255,0.2);
+            --selected-ring-color: #3182CE; /* Bright blue for selection ring */
+        }
+
+        body {
+            font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background-color: #F7FAFC; /* Light gray background */
+            color: #2D3748;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 1rem;
+            margin: 0;
+        }
+
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: white;
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        .board-area {
+            position: relative;
+            width: calc(var(--cell-size-md) * 8); /* 9 points, 8 cells wide */
+            height: calc(var(--cell-size-md) * 9); /* 10 points, 9 cells high */
+            background-color: var(--board-bg);
+            border: 2px solid var(--line-color);
+            border-radius: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .grid-line {
+            position: absolute;
+            background-color: var(--line-color);
+            z-index: 1;
+        }
+
+        .h-line {
+            width: 100%;
+            height: 1px;
+        }
+
+        .v-line {
+            width: 1px;
+            height: 100%;
+        }
+
+        .palace-line {
+            position: absolute;
+            background-color: var(--line-color);
+            z-index: 1;
+        }
+
+        .cell {
+            position: absolute;
+            width: var(--cell-size-md);
+            height: var(--cell-size-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 2;
+            font-weight: bold;
+            font-size: var(--piece-font-size-md);
+            transition: background-color 0.2s, box-shadow 0.2s, border-color 0.2s;
+            /* border-radius: 50%; Removed from base .cell, will be applied to pieces only */
+        }
+        
+        /* Styles for cells that contain pieces */
+        .cell.piece-red, .cell.piece-black {
+            border-radius: 50%; /* Make the piece circular */
+            box-shadow: var(--piece-shadow-style);
+        }
+
+        .cell.piece-red {
+            color: var(--red-piece-text-color); /* Character color */
+            background-color: var(--red-piece-bg-color);
+            border: 2px solid var(--red-piece-border-color);
+        }
+
+        .cell.piece-black {
+            color: var(--black-piece-text-color); /* Character color */
+            background-color: var(--black-piece-bg-color);
+            border: 2px solid var(--black-piece-border-color);
+        }
+        
+        .cell.selected {
+            background-color: var(--selected-bg) !important; /* Semi-transparent overlay, tints the piece */
+            /* Order of shadows: first is topmost. Piece's own border is preserved. */
+            box-shadow: var(--piece-shadow-style), /* Original piece shadow (underneath) */
+                        0 0 0 3px var(--selected-ring-color); /* Outer ring for selection */
+            z-index: 3; /* Ensure selected piece is visually on top */
+        }
+
+        .cell.valid-move::after {
+            content: '';
+            position: absolute;
+            width: 35%; /* Smaller dot for valid move */
+            height: 35%;
+            background-color: var(--valid-move-bg);
+            border-radius: 50%;
+            opacity: 0.9; /* Slightly more opaque */
+            z-index: 1; /* Below piece text if any, but visible on empty cells */
+        }
+        
+        /* Ensure piece text is above the valid-move marker's background if it's an empty cell */
+        .cell.piece-red span, .cell.piece-black span { /* If we ever wrap text in span */
+            position: relative;
+            z-index: 2;
+        }
+
+
+        .status-bar {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            min-height: 2em; 
+            text-align: center;
+        }
+
+        .controls button {
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            border: none;
+        }
+
+        .controls button:hover {
+            opacity: 0.9;
+        }
+        .controls button:active {
+            transform: translateY(1px);
+        }
+
+        .undo-button {
+            background-color: #4A5568; 
+            color: white;
+        }
+        .undo-button:hover {
+            background-color: #2D3748;
+        }
+        
+        .restart-button {
+            background-color: #48BB78; 
+            color: white;
+            margin-left: 0.5rem;
+        }
+        .restart-button:hover {
+            background-color: #38A169;
+        }
+
+        .river {
+            position: absolute;
+            left: 10%;
+            width: 80%;
+            top: calc(var(--cell-size-md) * 4.5 - 10px); 
+            text-align: center;
+            font-size: 16px;
+            color: var(--line-color);
+            opacity: 0.7;
+            pointer-events: none; 
+            z-index: 0;
+        }
+        .river-text-left {
+            position: absolute;
+            left: 15%;
+            font-size: calc(var(--cell-size-md) * 0.4);
+        }
+        .river-text-right {
+            position: absolute;
+            right: 15%;
+            font-size: calc(var(--cell-size-md) * 0.4);
+        }
+
+        .marker { /* Not currently used, but defined */
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background-color: var(--line-color);
+            border-radius: 50%;
+            z-index: 1;
+        }
+
+        @media (max-width: 600px) {
+            :root {
+                --cell-size-md: var(--cell-size-sm);
+                --piece-font-size-md: var(--piece-font-size-sm);
+            }
+            .game-container {
+                padding: 1rem;
+            }
+            .board-area {
+                width: calc(var(--cell-size-sm) * 8);
+                height: calc(var(--cell-size-sm) * 9);
+            }
+            .cell { /* Ensure cell size is responsive */
+                width: var(--cell-size-sm);
+                height: var(--cell-size-sm);
+                font-size: var(--piece-font-size-sm);
+            }
+            .status-bar {
+                font-size: 1rem;
+            }
+            .controls button {
+                padding: 0.5rem 1rem;
+                font-size: 0.875rem;
+            }
+            .river-text-left, .river-text-right {
+                 font-size: calc(var(--cell-size-sm) * 0.4);
+            }
+             .river {
+                top: calc(var(--cell-size-sm) * 4.5 - 8px);
+            }
+        }
+
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div id="statusBar" class="status-bar">红方回合</div>
+        <div id="boardArea" class="board-area">
+            <div class="river">
+                <span class="river-text-left">楚 河</span>
+                <span class="river-text-right">漢 界</span>
+            </div>
+            </div>
+        <div class="controls">
+            <button id="undoButton" class="undo-button">悔棋</button>
+            <button id="restartButton" class="restart-button">重新开始</button>
+        </div>
+         <div id="messageBox" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50 hidden">
+            <div class="bg-white p-8 rounded-lg shadow-xl text-center">
+                <p id="messageText" class="text-xl mb-4"></p>
+                <button id="closeMessageButton" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                    知道了
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Constants ---
+        const ROWS = 10;
+        const COLS = 9;
+        const CELL_SIZE_JS = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cell-size-md')); // Renamed from CELL_SIZE
+
+        const PIECE_CHARS = { // Piece characters
+            RED: { KING: '帥', ADVISOR: '仕', ELEPHANT: '相', HORSE: '傌', CHARIOT: '俥', CANNON: '炮', SOLDIER: '兵' },
+            BLACK: { KING: '將', ADVISOR: '士', ELEPHANT: '象', HORSE: '馬', CHARIOT: '車', CANNON: '砲', SOLDIER: '卒' }
+        };
+        const PIECE_TYPES = { // Piece types (used internally)
+            KING: 'KING', ADVISOR: 'ADVISOR', ELEPHANT: 'ELEPHANT', HORSE: 'HORSE',
+            CHARIOT: 'CHARIOT', CANNON: 'CANNON', SOLDIER: 'SOLDIER'
+        };
+        const PLAYER_RED = 'RED'; // Red player
+        const PLAYER_BLACK = 'BLACK'; // Black player
+
+        // --- Game State ---
+        let board = []; // 2D array representing the board state
+        let currentPlayer = PLAYER_RED; // Current player's turn
+        let selectedPiece = null; // Stores { piece, r, c } of the selected piece
+        let moveHistory = []; // Array to store board states for the undo functionality
+        let gameEnded = false; // Flag to indicate if the game has ended
+
+        // --- DOM Elements ---
+        const boardArea = document.getElementById('boardArea'); // The main game board area
+        const statusBar = document.getElementById('statusBar'); // Displays game status messages
+        const undoButton = document.getElementById('undoButton'); // Button to undo the last move
+        const restartButton = document.getElementById('restartButton'); // Button to restart the game
+        const messageBox = document.getElementById('messageBox'); // Modal for messages
+        const messageText = document.getElementById('messageText'); // Text content of the modal
+        const closeMessageButton = document.getElementById('closeMessageButton'); // Button to close the modal
+
+
+        // --- Initialization Functions ---
+        /**
+         * Initializes the 'board' array with nulls and then places pieces in their starting positions.
+         */
+        function initBoardArray() {
+            board = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
+            // Defines the initial setup of all pieces on the board
+            const setup = [
+                // Red pieces (bottom side)
+                { r: 0, c: 0, type: PIECE_TYPES.CHARIOT, color: PLAYER_RED }, { r: 0, c: 1, type: PIECE_TYPES.HORSE, color: PLAYER_RED },
+                { r: 0, c: 2, type: PIECE_TYPES.ELEPHANT, color: PLAYER_RED }, { r: 0, c: 3, type: PIECE_TYPES.ADVISOR, color: PLAYER_RED },
+                { r: 0, c: 4, type: PIECE_TYPES.KING, color: PLAYER_RED }, { r: 0, c: 5, type: PIECE_TYPES.ADVISOR, color: PLAYER_RED },
+                { r: 0, c: 6, type: PIECE_TYPES.ELEPHANT, color: PLAYER_RED }, { r: 0, c: 7, type: PIECE_TYPES.HORSE, color: PLAYER_RED },
+                { r: 0, c: 8, type: PIECE_TYPES.CHARIOT, color: PLAYER_RED },
+                { r: 2, c: 1, type: PIECE_TYPES.CANNON, color: PLAYER_RED }, { r: 2, c: 7, type: PIECE_TYPES.CANNON, color: PLAYER_RED },
+                { r: 3, c: 0, type: PIECE_TYPES.SOLDIER, color: PLAYER_RED }, { r: 3, c: 2, type: PIECE_TYPES.SOLDIER, color: PLAYER_RED },
+                { r: 3, c: 4, type: PIECE_TYPES.SOLDIER, color: PLAYER_RED }, { r: 3, c: 6, type: PIECE_TYPES.SOLDIER, color: PLAYER_RED },
+                { r: 3, c: 8, type: PIECE_TYPES.SOLDIER, color: PLAYER_RED },
+
+                // Black pieces (top side)
+                { r: 9, c: 0, type: PIECE_TYPES.CHARIOT, color: PLAYER_BLACK }, { r: 9, c: 1, type: PIECE_TYPES.HORSE, color: PLAYER_BLACK },
+                { r: 9, c: 2, type: PIECE_TYPES.ELEPHANT, color: PLAYER_BLACK }, { r: 9, c: 3, type: PIECE_TYPES.ADVISOR, color: PLAYER_BLACK },
+                { r: 9, c: 4, type: PIECE_TYPES.KING, color: PLAYER_BLACK }, { r: 9, c: 5, type: PIECE_TYPES.ADVISOR, color: PLAYER_BLACK },
+                { r: 9, c: 6, type: PIECE_TYPES.ELEPHANT, color: PLAYER_BLACK }, { r: 9, c: 7, type: PIECE_TYPES.HORSE, color: PLAYER_BLACK },
+                { r: 9, c: 8, type: PIECE_TYPES.CHARIOT, color: PLAYER_BLACK },
+                { r: 7, c: 1, type: PIECE_TYPES.CANNON, color: PLAYER_BLACK }, { r: 7, c: 7, type: PIECE_TYPES.CANNON, color: PLAYER_BLACK },
+                { r: 6, c: 0, type: PIECE_TYPES.SOLDIER, color: PLAYER_BLACK }, { r: 6, c: 2, type: PIECE_TYPES.SOLDIER, color: PLAYER_BLACK },
+                { r: 6, c: 4, type: PIECE_TYPES.SOLDIER, color: PLAYER_BLACK }, { r: 6, c: 6, type: PIECE_TYPES.SOLDIER, color: PLAYER_BLACK },
+                { r: 6, c: 8, type: PIECE_TYPES.SOLDIER, color: PLAYER_BLACK },
+            ];
+
+            setup.forEach(p => { // Places each piece on the board array
+                board[p.r][p.c] = { type: p.type, color: p.color, char: PIECE_CHARS[p.color][p.type] };
+            });
+        }
+        
+        /**
+         * Draws the grid lines (horizontal, vertical, palace diagonals) on the board.
+         */
+        function drawBoardGrid() {
+            const cellSize = CELL_SIZE_JS(); // Get current cell size
+            // boardArea.innerHTML = ''; // Clear previous grid if any (handled in resize now)
+            
+            // Add river text if it's not there (e.g. after resize clear)
+            if (!boardArea.querySelector('.river')) {
+                const riverDiv = document.createElement('div');
+                riverDiv.className = 'river';
+                riverDiv.innerHTML = '<span class="river-text-left">楚 河</span><span class="river-text-right">漢 界</span>';
+                boardArea.appendChild(riverDiv);
+            }
+
+
+            // Horizontal lines
+            for (let i = 0; i < ROWS; i++) {
+                const line = document.createElement('div');
+                line.className = 'grid-line h-line';
+                line.style.top = `${i * cellSize}px`;
+                boardArea.appendChild(line);
+            }
+
+            // Vertical lines (handling the river gap)
+            for (let i = 0; i < COLS; i++) {
+                if (i > 0 && i < COLS - 1) { // Inner vertical lines with river gap
+                    const topSegment = document.createElement('div');
+                    topSegment.className = 'grid-line v-line';
+                    topSegment.style.left = `${i * cellSize}px`;
+                    topSegment.style.top = `0px`;
+                    topSegment.style.height = `${4 * cellSize}px`; // To the river
+                    boardArea.appendChild(topSegment);
+
+                    const bottomSegment = document.createElement('div');
+                    bottomSegment.className = 'grid-line v-line';
+                    bottomSegment.style.left = `${i * cellSize}px`;
+                    bottomSegment.style.top = `${5 * cellSize}px`; // From the river
+                    bottomSegment.style.height = `${4 * cellSize}px`; // To the bottom
+                    boardArea.appendChild(bottomSegment);
+                } else { // Boundary vertical lines (full height)
+                    const line = document.createElement('div');
+                    line.className = 'grid-line v-line';
+                    line.style.left = `${i * cellSize}px`;
+                    boardArea.appendChild(line);
+                }
+            }
+
+            // Palace diagonal lines
+            const palaceCoords = [
+                { r1: 0, c1: 3, r2: 2, c2: 5 }, { r1: 0, c1: 5, r2: 2, c2: 3 }, // Red palace
+                { r1: 7, c1: 3, r2: 9, c2: 5 }, { r1: 7, c1: 5, r2: 9, c2: 3 }  // Black palace
+            ];
+            palaceCoords.forEach(coords => {
+                const line = document.createElement('div');
+                line.className = 'palace-line';
+                const x1 = coords.c1 * cellSize; const y1 = coords.r1 * cellSize;
+                const x2 = coords.c2 * cellSize; const y2 = coords.r2 * cellSize;
+                
+                const length = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+                const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+
+                line.style.width = `${length}px`; line.style.height = '1px';
+                line.style.left = `${x1}px`; line.style.top = `${y1}px`;
+                line.style.transformOrigin = '0 0';
+                line.style.transform = `rotate(${angle}deg)`;
+                boardArea.appendChild(line);
+            });
+        }
+
+        /**
+         * Renders the pieces on the board based on the 'board' array.
+         * Clears existing pieces and redraws them.
+         */
+        function renderBoard() {
+            // Clear only piece cells, not grid lines
+            boardArea.querySelectorAll('.cell').forEach(cell => cell.remove());
+            const cellSize = CELL_SIZE_JS();
+
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    // Position cells at intersections (center of piece on intersection)
+                    cell.style.left = `${c * cellSize - cellSize / 2}px`;
+                    cell.style.top = `${r * cellSize - cellSize / 2}px`;
+                    cell.dataset.r = r; // Store row and col for click handling
+                    cell.dataset.c = c;
+
+                    const piece = board[r][c];
+                    if (piece) { // If a piece exists at this position
+                        cell.textContent = piece.char; // Set the character
+                        cell.classList.add(piece.color === PLAYER_RED ? 'piece-red' : 'piece-black');
+                    }
+                    
+                    cell.addEventListener('click', () => handleCellClick(r, c));
+                    boardArea.appendChild(cell);
+                }
+            }
+            updateStatus(); // Update the status bar (e.g., whose turn)
+            updateUndoButton(); // Enable/disable undo button
+        }
+
+        // --- Game Logic Functions ---
+        /**
+         * Handles clicks on board cells.
+         * Manages piece selection, deselection, and making moves.
+         * @param {number} r - Row of the clicked cell.
+         * @param {number} c - Column of the clicked cell.
+         */
+        function handleCellClick(r, c) {
+            if (gameEnded) return; // Do nothing if the game has ended
+
+            const pieceAtClick = board[r][c]; // Piece at the clicked cell (can be null)
+
+            if (selectedPiece) { // If a piece is already selected
+                const { piece: selP, r: selR, c: selC } = selectedPiece;
+                const validMoves = getValidMoves(selP, selR, selC); // Get valid moves for the selected piece
+                
+                // Check if the clicked cell (r, c) is a valid move destination
+                if (validMoves.some(move => move.r === r && move.c === c)) {
+                    saveCurrentBoardState(); // Save board state before making the move (for undo)
+                    
+                    const capturedPiece = board[r][c]; // Store potentially captured piece
+                    board[r][c] = selP; // Move selected piece to new cell
+                    board[selR][selC] = null; // Empty the original cell
+
+                    // Validate move against putting own king in check or flying general
+                    if (isKingInCheck(selP.color) || isFlyingGeneralCondition()) {
+                        // Revert move if it's invalid (puts own king in check or flying general)
+                        board[selR][selC] = selP;
+                        board[r][c] = capturedPiece;
+                        moveHistory.pop(); // Remove the invalid state from history
+                        const message = isKingInCheck(selP.color) ? "无效移动：不能让自己的帅（将）被将军。" : "无效移动：将帅不能直接相对且中间无子。";
+                        showMessage(message);
+                        selectedPiece = null; // Deselect piece
+                        clearHighlights();
+                        return;
+                    }
+
+                    selectedPiece = null; // Deselect piece after a valid move
+                    currentPlayer = (currentPlayer === PLAYER_RED) ? PLAYER_BLACK : PLAYER_RED; // Switch turns
+                    
+                    renderBoard(); // Re-render the board with the new state
+                    checkGameEnd(); // Check if the game has ended (checkmate/stalemate)
+
+                } else if (pieceAtClick && pieceAtClick.color === currentPlayer) {
+                    // If clicked on another piece of the current player, select that piece instead
+                    selectedPiece = { piece: pieceAtClick, r, c };
+                    highlightValidMoves(getValidMoves(pieceAtClick, r, c));
+                } else {
+                    // Clicked on an invalid spot or an empty cell not a valid move
+                    selectedPiece = null; // Deselect current piece
+                    clearHighlights(); // Remove previous highlights
+                }
+            } else { // If no piece is currently selected
+                if (pieceAtClick && pieceAtClick.color === currentPlayer) {
+                    // If clicked on a piece belonging to the current player, select it
+                    selectedPiece = { piece: pieceAtClick, r, c };
+                    highlightValidMoves(getValidMoves(pieceAtClick, r, c));
+                }
+            }
+        }
+        
+        /**
+         * Checks for the "flying general" condition (kings facing each other with no pieces between).
+         * @returns {boolean} True if the condition is met, false otherwise.
+         */
+        function isFlyingGeneralCondition() {
+            const kings = [];
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] && board[r][c].type === PIECE_TYPES.KING) {
+                        kings.push({ ...board[r][c], r, c });
+                    }
+                }
+            }
+            if (kings.length < 2) return false; 
+
+            const [king1, king2] = kings;
+            if (king1.c !== king2.c) return false; // Not in the same column
+
+            const startR = Math.min(king1.r, king2.r) + 1;
+            const endR = Math.max(king1.r, king2.r);
+            for (let r = startR; r < endR; r++) {
+                if (board[r][king1.c]) return false; // Piece found in between
+            }
+            return true; // Generals are facing with no pieces in between
+        }
+
+        /**
+         * Saves the current board state and current player to the move history.
+         */
+        function saveCurrentBoardState() {
+            const boardCopy = JSON.parse(JSON.stringify(board)); // Deep copy of the board
+            moveHistory.push({board: boardCopy, player: currentPlayer});
+        }
+
+        /**
+         * Reverts the last move made, restoring the board to its previous state.
+         */
+        function undoMove() {
+            if (gameEnded) { gameEnded = false; } // Re-enable game if undoing from a game-over state
+            
+            if (moveHistory.length > 0) {
+                const lastState = moveHistory.pop();
+                board = JSON.parse(JSON.stringify(lastState.board)); // Restore board
+                currentPlayer = lastState.player; // Restore player
+                selectedPiece = null;
+                renderBoard();
+                clearHighlights(); 
+            } else {
+                showMessage("没有可悔的棋了。");
+            }
+        }
+        
+        /**
+         * Resets the game to its initial state.
+         */
+        function restartGame() {
+            initBoardArray();
+            currentPlayer = PLAYER_RED;
+            selectedPiece = null;
+            moveHistory = [];
+            gameEnded = false;
+            renderBoard();
+            clearHighlights();
+            updateStatus();
+            updateUndoButton();
+        }
+
+        /**
+         * Updates the status bar text to show whose turn it is and if a king is in check.
+         */
+        function updateStatus() {
+            if (gameEnded) return; 
+            statusBar.textContent = `${currentPlayer === PLAYER_RED ? '红' : '黑'}方回合`;
+            if (isKingInCheck(currentPlayer)) {
+                 statusBar.textContent += ' (将军!)';
+            }
+        }
+        
+        /**
+         * Enables or disables the undo button based on move history.
+         */
+        function updateUndoButton() {
+            undoButton.disabled = moveHistory.length === 0 && !gameEnded; // Can undo final move if game ended
+            undoButton.classList.toggle('opacity-50', undoButton.disabled);
+            undoButton.classList.toggle('cursor-not-allowed', undoButton.disabled);
+        }
+
+        /**
+         * Highlights the selected piece and its valid moves on the board.
+         * @param {Array} moves - An array of valid move objects {r, c}.
+         */
+        function highlightValidMoves(moves) {
+            clearHighlights(); // Clear any existing highlights
+            // Highlight selected piece
+            if(selectedPiece) {
+                const selectedCellDom = document.querySelector(`.cell[data-r="${selectedPiece.r}"][data-c="${selectedPiece.c}"]`);
+                if (selectedCellDom) selectedCellDom.classList.add('selected');
+            }
+            // Highlight valid move destinations
+            moves.forEach(move => {
+                const cellDom = document.querySelector(`.cell[data-r="${move.r}"][data-c="${move.c}"]`);
+                if (cellDom) {
+                    cellDom.classList.add('valid-move');
+                }
+            });
+        }
+
+        /**
+         * Clears all selection and valid move highlights from the board.
+         */
+        function clearHighlights() {
+            document.querySelectorAll('.cell.selected').forEach(c => c.classList.remove('selected'));
+            document.querySelectorAll('.cell.valid-move').forEach(c => c.classList.remove('valid-move'));
+        }
+
+        // --- Piece Movement Rules ---
+        /**
+         * Gets all valid moves for a given piece at a given position.
+         * Filters out moves that would put the player's own king in check.
+         * @param {object} piece - The piece object.
+         * @param {number} r - Current row of the piece.
+         * @param {number} c - Current column of the piece.
+         * @returns {Array} An array of valid move objects {r, c}.
+         */
+        function getValidMoves(piece, r, c) {
+            let potentialMoves = [];
+            const color = piece.color;
+
+            // Get moves based on piece type (raw moves, without self-check validation yet)
+            switch (piece.type) {
+                case PIECE_TYPES.KING: potentialMoves = getKingMoves(r, c, color); break;
+                case PIECE_TYPES.ADVISOR: potentialMoves = getAdvisorMoves(r, c, color); break;
+                case PIECE_TYPES.ELEPHANT: potentialMoves = getElephantMoves(r, c, color); break;
+                case PIECE_TYPES.HORSE: potentialMoves = getHorseMoves(r, c, color); break;
+                case PIECE_TYPES.CHARIOT: potentialMoves = getChariotMoves(r, c, color); break;
+                case PIECE_TYPES.CANNON: potentialMoves = getCannonMoves(r, c, color); break;
+                case PIECE_TYPES.SOLDIER: potentialMoves = getSoldierMoves(r, c, color); break;
+            }
+            // Filter out moves that would put own king in check or result in flying general
+            return potentialMoves.filter(move => {
+                const originalPieceAtTarget = board[move.r][move.c]; // Piece at destination
+                const pieceAtOrigin = board[r][c]; // Piece being moved
+                
+                // Simulate the move
+                board[move.r][move.c] = pieceAtOrigin;
+                board[r][c] = null;
+
+                let isValid = true;
+                if (isKingInCheck(color) || isFlyingGeneralCondition()) { // Check for self-check or flying general
+                    isValid = false;
+                }
+
+                // Revert the simulated move
+                board[r][c] = pieceAtOrigin;
+                board[move.r][move.c] = originalPieceAtTarget;
+                return isValid;
+            });
+        }
+
+        // Helper functions for piece movements
+        function isInBounds(r, c) { return r >= 0 && r < ROWS && c >= 0 && c < COLS; }
+        function isPalace(r, c, color) { // Checks if (r,c) is within the palace for the given color
+            if (c < 3 || c > 5) return false;
+            if (color === PLAYER_RED) return r >= 0 && r <= 2;
+            return r >= 7 && r <= 9; // PLAYER_BLACK
+        }
+
+        // Movement logic for each piece type
+        function getKingMoves(r, c, color) {
+            const moves = []; const deltas = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+            deltas.forEach(([dr, dc]) => {
+                const nr = r + dr; const nc = c + dc;
+                if (isInBounds(nr, nc) && isPalace(nr, nc, color) && (!board[nr][nc] || board[nr][nc].color !== color)) {
+                    moves.push({ r: nr, c: nc });
+                }
+            });
+            return moves;
+        }
+        function getAdvisorMoves(r, c, color) {
+            const moves = []; const deltas = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+            deltas.forEach(([dr, dc]) => {
+                const nr = r + dr; const nc = c + dc;
+                if (isInBounds(nr, nc) && isPalace(nr, nc, color) && (!board[nr][nc] || board[nr][nc].color !== color)) {
+                    moves.push({ r: nr, c: nc });
+                }
+            });
+            return moves;
+        }
+        function getElephantMoves(r, c, color) {
+            const moves = [];
+            const deltas = [
+                { dr: -2, dc: -2, blockR: -1, blockC: -1 }, { dr: -2, dc: 2, blockR: -1, blockC: 1 },
+                { dr: 2, dc: -2, blockR: 1, blockC: -1 }, { dr: 2, dc: 2, blockR: 1, blockC: 1 }
+            ];
+            deltas.forEach(d => {
+                const nr = r + d.dr; const nc = c + d.dc;
+                const blockNr = r + d.blockR; const blockNc = c + d.blockC;
+                const riverCross = (color === PLAYER_RED && nr > 4) || (color === PLAYER_BLACK && nr < 5);
+                if (isInBounds(nr, nc) && !riverCross && !board[blockNr][blockNc] && (!board[nr][nc] || board[nr][nc].color !== color)) {
+                    moves.push({ r: nr, c: nc });
+                }
+            });
+            return moves;
+        }
+        function getHorseMoves(r, c, color) {
+            const moves = [];
+            const deltas = [
+                [-2, -1, -1, 0], [-2, 1, -1, 0], [2, -1, 1, 0], [2, 1, 1, 0],
+                [-1, -2, 0, -1], [1, -2, 0, -1], [-1, 2, 0, 1], [1, 2, 0, 1]
+            ];
+            deltas.forEach(([dr, dc, obr, obc]) => {
+                const nr = r + dr; const nc = c + dc;
+                const blockR = r + obr; const blockC = c + obc;
+                if (isInBounds(nr, nc) && !board[blockR][blockC] && (!board[nr][nc] || board[nr][nc].color !== color)) {
+                    moves.push({ r: nr, c: nc });
+                }
+            });
+            return moves;
+        }
+        function getChariotMoves(r, c, color) {
+            const moves = []; const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+            directions.forEach(([dr, dc]) => {
+                for (let i = 1; ; i++) {
+                    const nr = r + i * dr; const nc = c + i * dc;
+                    if (!isInBounds(nr, nc)) break;
+                    if (board[nr][nc]) {
+                        if (board[nr][nc].color !== color) moves.push({ r: nr, c: nc });
+                        break; 
+                    }
+                    moves.push({ r: nr, c: nc });
+                }
+            });
+            return moves;
+        }
+        function getCannonMoves(r, c, color) {
+            const moves = []; const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+            directions.forEach(([dr, dc]) => {
+                let jumped = false;
+                for (let i = 1; ; i++) {
+                    const nr = r + i * dr; const nc = c + i * dc;
+                    if (!isInBounds(nr, nc)) break;
+                    if (!board[nr][nc]) { // Empty square
+                        if (!jumped) moves.push({ r: nr, c: nc });
+                    } else { // Square is occupied
+                        if (!jumped) jumped = true; // This is the piece to jump over
+                        else { // Already jumped one piece
+                            if (board[nr][nc].color !== color) moves.push({ r: nr, c: nc }); // Capture
+                            break; 
+                        }
+                    }
+                }
+            });
+            return moves;
+        }
+        function getSoldierMoves(r, c, color) {
+            const moves = []; const forward = (color === PLAYER_RED) ? 1 : -1;
+            const nrFwd = r + forward;
+            if (isInBounds(nrFwd, c) && (!board[nrFwd][c] || board[nrFwd][c].color !== color)) {
+                moves.push({ r: nrFwd, c: c });
+            }
+            const crossedRiver = (color === PLAYER_RED && r > 4) || (color === PLAYER_BLACK && r < 5);
+            if (crossedRiver) {
+                const sideways = [-1, 1];
+                sideways.forEach(dcSide => {
+                    const ncSide = c + dcSide;
+                    if (isInBounds(r, ncSide) && (!board[r][ncSide] || board[r][ncSide].color !== color)) {
+                        moves.push({ r: r, c: ncSide });
+                    }
+                });
+            }
+            return moves;
+        }
+
+        // --- Check and Checkmate Logic ---
+        function findKing(playerColor) { // Finds the king of the specified player
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const piece = board[r][c];
+                    if (piece && piece.type === PIECE_TYPES.KING && piece.color === playerColor) {
+                        return { piece, r, c };
+                    }
+                }
+            }
+            return null;
+        }
+
+        /**
+         * Checks if the specified player's king is currently in check.
+         * @param {string} playerColor - The color of the player (PLAYER_RED or PLAYER_BLACK).
+         * @returns {boolean} True if the king is in check, false otherwise.
+         */
+        function isKingInCheck(playerColor) {
+            const kingPos = findKing(playerColor);
+            if (!kingPos) return false;
+
+            const opponentColor = (playerColor === PLAYER_RED) ? PLAYER_BLACK : PLAYER_RED;
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const piece = board[r][c];
+                    if (piece && piece.color === opponentColor) {
+                        // Use raw moves for check detection to avoid infinite recursion with getValidMoves
+                        const rawMoves = getRawMovesForCheckDetection(piece, r, c);
+                        if (rawMoves.some(move => move.r === kingPos.r && move.c === kingPos.c)) {
+                            return true; // King is attacked by an opponent's piece
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        
+        /**
+         * Gets raw moves for a piece, used specifically for check detection.
+         * This version does not filter for self-check to avoid recursion.
+         */
+        function getRawMovesForCheckDetection(piece, r, c) {
+            const color = piece.color;
+            switch (piece.type) { // Return moves based on piece type without self-check validation
+                case PIECE_TYPES.KING: return getKingMoves(r, c, color); 
+                case PIECE_TYPES.ADVISOR: return getAdvisorMoves(r, c, color);
+                case PIECE_TYPES.ELEPHANT: return getElephantMoves(r, c, color);
+                case PIECE_TYPES.HORSE: return getHorseMoves(r, c, color);
+                case PIECE_TYPES.CHARIOT: return getChariotMoves(r, c, color);
+                case PIECE_TYPES.CANNON: return getCannonMoves(r, c, color);
+                case PIECE_TYPES.SOLDIER: return getSoldierMoves(r, c, color);
+                default: return [];
+            }
+        }
+
+        /**
+         * Checks if the current player has any valid moves they can make.
+         * @param {string} playerColor - The color of the player to check.
+         * @returns {boolean} True if the player can make a move, false otherwise.
+         */
+        function canPlayerMakeAnyMove(playerColor) {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const piece = board[r][c];
+                    if (piece && piece.color === playerColor) {
+                        const validMoves = getValidMoves(piece, r, c); // getValidMoves already filters for self-check
+                        if (validMoves.length > 0) {
+                            return true; // Found at least one valid move
+                        }
+                    }
+                }
+            }
+            return false; // No valid moves found for any piece of this player
+        }
+
+        /**
+         * Checks if the game has ended due to checkmate or stalemate.
+         * Updates game status and shows a message if the game is over.
+         * @returns {boolean} True if the game has ended, false otherwise.
+         */
+        function checkGameEnd() {
+            const kingInCheck = isKingInCheck(currentPlayer);
+            const canMove = canPlayerMakeAnyMove(currentPlayer);
+
+            if (kingInCheck && !canMove) { // Checkmate
+                gameEnded = true;
+                const winner = (currentPlayer === PLAYER_RED) ? "黑方" : "红方";
+                statusBar.textContent = `将军! ${winner}胜利!`;
+                showMessage(`将军! ${winner}胜利! (绝杀)`);
+                updateUndoButton(); 
+                return true;
+            }
+            if (!kingInCheck && !canMove) { // Stalemate
+                gameEnded = true;
+                statusBar.textContent = "和棋! (无子可走)";
+                showMessage("和棋! (无子可走)");
+                updateUndoButton();
+                return true;
+            }
+            updateStatus(); // Update normal status if game not ended
+            return false;
+        }
+        
+        // --- UI Helper Functions ---
+        function showMessage(text) { // Shows a modal message
+            messageText.textContent = text;
+            messageBox.classList.remove('hidden');
+        }
+        function hideMessage() { // Hides the modal message
+            messageBox.classList.add('hidden');
+        }
+
+        // --- Event Listeners ---
+        undoButton.addEventListener('click', undoMove);
+        restartButton.addEventListener('click', restartGame);
+        closeMessageButton.addEventListener('click', hideMessage);
+        
+        /**
+         * Handles window resize events to redraw the board and pieces correctly.
+         */
+        window.addEventListener('resize', () => {
+            // Clear all generated elements inside boardArea (grid lines and cells)
+            // Keep the .river div as it's part of the static HTML structure inside boardArea
+            Array.from(boardArea.children).forEach(child => {
+                if (!child.classList.contains('river')) {
+                    child.remove();
+                }
+            });
+            
+            drawBoardGrid(); // Redraw grid lines
+            renderBoard(); // Redraw pieces
+            if (selectedPiece) { // Re-highlight if a piece was selected
+                 highlightValidMoves(getValidMoves(selectedPiece.piece, selectedPiece.r, selectedPiece.c));
+            }
+        });
+
+        // --- Main Game Start Function ---
+        function main() {
+            drawBoardGrid(); // Initial draw of the grid
+            initBoardArray(); // Set up pieces
+            // saveCurrentBoardState(); // Save initial state for potential first undo - not needed, no move yet
+            // moveHistory.pop(); 
+            renderBoard(); // Render pieces on the board
+        }
+        
+        main(); // Start the game
+
+    </script>
+</body>
+</html>

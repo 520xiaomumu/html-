@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>超级马里奥游戏</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(to bottom, #87CEEB 0%, #87CEEB 60%, #90EE90 60%, #90EE90 100%);
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #gameCanvas {
+            display: block;
+            margin: 0 auto;
+            border: 2px solid #333;
+            background: linear-gradient(to bottom, #87CEEB 0%, #87CEEB 60%, #90EE90 60%, #90EE90 100%);
+        }
+        
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+        
+        #instructions {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            font-size: 14px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            text-align: right;
+            z-index: 100;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            font-size: 24px;
+            display: none;
+            z-index: 200;
+        }
+        
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 10px;
+            border: none;
+            border-radius: 5px;
+            background: #ff6b6b;
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #ff5252;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div>金币: <span id="coinCount">0</span></div>
+        <div>生命: <span id="lives">3</span></div>
+        <div>分数: <span id="score">0</span></div>
+    </div>
+    
+    <div id="instructions">
+        <div>A/D - 移动</div>
+        <div>W/空格 - 跳跃</div>
+        <div>收集金币，避开或踩扁敌人！</div>
+    </div>
+    
+    <div id="gameOver">
+        <div id="gameOverText">游戏结束!</div>
+        <button onclick="restartGame()">重新开始</button>
+    </div>
+    
+    <canvas id="gameCanvas" width="1000" height="600"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 游戏状态
+        let gameState = {
+            coins: 0,
+            lives: 3,
+            score: 0,
+            gameRunning: true,
+            camera: { x: 0, y: 0 }
+        };
+        
+        // 输入处理
+        const keys = {};
+        
+        // 玩家对象
+        const player = {
+            x: 100,
+            y: 300,
+            width: 30,
+            height: 40,
+            vx: 0,
+            vy: 0,
+            onGround: false,
+            color: '#ff4444',
+            speed: 5,
+            jumpPower: 15,
+            direction: 1 // 1 for right, -1 for left
+        };
+        
+        // 平台数组
+        const platforms = [
+            {x: 0, y: 550, width: 300, height: 50},
+            {x: 400, y: 450, width: 200, height: 20},
+            {x: 700, y: 350, width: 150, height: 20},
+            {x: 950, y: 250, width: 200, height: 20},
+            {x: 1200, y: 450, width: 300, height: 20},
+            {x: 1600, y: 350, width: 200, height: 20},
+            {x: 1900, y: 250, width: 250, height: 20},
+            {x: 2200, y: 550, width: 400, height: 50}
+        ];
+        
+        // 金币数组
+        const coins = [
+            {x: 150, y: 500, width: 20, height: 20, collected: false},
+            {x: 500, y: 400, width: 20, height: 20, collected: false},
+            {x: 750, y: 300, width: 20, height: 20, collected: false},
+            {x: 1000, y: 200, width: 20, height: 20, collected: false},
+            {x: 1300, y: 400, width: 20, height: 20, collected: false},
+            {x: 1700, y: 300, width: 20, height: 20, collected: false},
+            {x: 2000, y: 200, width: 20, height: 20, collected: false},
+            {x: 2300, y: 500, width: 20, height: 20, collected: false}
+        ];
+        
+        // 敌人数组
+        const enemies = [
+            {x: 500, y: 420, width: 25, height: 25, vx: -2, color: '#8B4513', alive: true, onGround: true},
+            {x: 800, y: 320, width: 25, height: 25, vx: 2, color: '#8B4513', alive: true, onGround: true},
+            {x: 1300, y: 420, width: 25, height: 25, vx: -1.5, color: '#8B4513', alive: true, onGround: true},
+            {x: 1800, y: 220, width: 25, height: 25, vx: 2, color: '#8B4513', alive: true, onGround: true},
+            {x: 2400, y: 520, width: 25, height: 25, vx: -2.5, color: '#8B4513', alive: true, onGround: true}
+        ];
+        
+        // 粒子系统 - 跳跃冲击波
+        const particles = [];
+        
+        // 事件监听
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+        
+        function createShockwave(x, y) {
+            for (let i = 0; i < 12; i++) {
+                const angle = (i / 12) * Math.PI * 2;
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * 6,
+                    vy: Math.sin(angle) * 6,
+                    life: 30,
+                    maxLife: 30,
+                    size: 4,
+                    color: '#ffff00'
+                });
+            }
+        }
+        
+        function updatePlayer() {
+            if (!gameState.gameRunning) return;
+            
+            // 水平移动
+            if (keys['a'] || keys['arrowleft']) {
+                player.vx = -player.speed;
+                player.direction = -1;
+            } else if (keys['d'] || keys['arrowright']) {
+                player.vx = player.speed;
+                player.direction = 1;
+            } else {
+                player.vx *= 0.8; // 摩擦力
+            }
+            
+            // 跳跃
+            if ((keys['w'] || keys[' ']) && player.onGround) {
+                player.vy = -player.jumpPower;
+                player.onGround = false;
+                createShockwave(player.x + player.width/2, player.y + player.height);
+            }
+            
+            // 重力
+            if (!player.onGround) {
+                player.vy += 0.8;
+            }
+            
+            // 更新位置
+            player.x += player.vx;
+            player.y += player.vy;
+            
+            // 边界检查
+            if (player.x < 0) player.x = 0;
+            if (player.y > canvas.height) {
+                gameState.lives--;
+                resetPlayerPosition();
+                if (gameState.lives <= 0) {
+                    gameOver();
+                }
+            }
+            
+            // 平台碰撞检测
+            player.onGround = false;
+            for (let platform of platforms) {
+                if (player.x < platform.x + platform.width &&
+                    player.x + player.width > platform.x &&
+                    player.y < platform.y + platform.height &&
+                    player.y + player.height > platform.y) {
+                    
+                    // 从上方落到平台上
+                    if (player.vy > 0 && player.y < platform.y) {
+                        player.y = platform.y - player.height;
+                        player.vy = 0;
+                        player.onGround = true;
+                    }
+                    // 从下方撞到平台
+                    else if (player.vy < 0 && player.y > platform.y) {
+                        player.y = platform.y + platform.height;
+                        player.vy = 0;
+                    }
+                    // 从侧面撞到平台
+                    else if (player.vx > 0) {
+                        player.x = platform.x - player.width;
+                    } else if (player.vx < 0) {
+                        player.x = platform.x + platform.width;
+                    }
+                }
+            }
+        }
+        
+        function updateEnemies() {
+            for (let enemy of enemies) {
+                if (!enemy.alive) continue;
+                
+                enemy.x += enemy.vx;
+                
+                // 敌人平台碰撞检测
+                enemy.onGround = false;
+                for (let platform of platforms) {
+                    if (enemy.x < platform.x + platform.width &&
+                        enemy.x + enemy.width > platform.x &&
+                        enemy.y < platform.y + platform.height &&
+                        enemy.y + enemy.height > platform.y) {
+                        
+                        if (enemy.y < platform.y) {
+                            enemy.y = platform.y - enemy.height;
+                            enemy.onGround = true;
+                        }
+                    }
+                }
+                
+                // 敌人边界反弹
+                let onPlatform = false;
+                for (let platform of platforms) {
+                    if (enemy.y + enemy.height >= platform.y &&
+                        enemy.y + enemy.height <= platform.y + 10 &&
+                        enemy.x + enemy.width > platform.x &&
+                        enemy.x < platform.x + platform.width) {
+                        onPlatform = true;
+                        break;
+                    }
+                }
+                
+                if (!onPlatform || enemy.x <= 0 || enemy.x + enemy.width >= 2600) {
+                    enemy.vx = -enemy.vx;
+                }
+                
+                // 敌人重力
+                if (!enemy.onGround) {
+                    enemy.y += 2;
+                }
+                
+                // 与玩家碰撞检测
+                if (player.x < enemy.x + enemy.width &&
+                    player.x + player.width > enemy.x &&
+                    player.y < enemy.y + enemy.height &&
+                    player.y + player.height > enemy.y) {
+                    
+                    // 玩家从上方踩到敌人
+                    if (player.vy > 0 && player.y < enemy.y) {
+                        enemy.alive = false;
+                        player.vy = -8; // 反弹
+                        gameState.score += 100;
+                        createShockwave(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+                    } else {
+                        // 玩家被敌人伤害
+                        gameState.lives--;
+                        resetPlayerPosition();
+                        if (gameState.lives <= 0) {
+                            gameOver();
+                        }
+                    }
+                }
+            }
+        }
+        
+        function updateCoins() {
+            for (let coin of coins) {
+                if (coin.collected) continue;
+                
+                // 金币与玩家碰撞检测
+                if (player.x < coin.x + coin.width &&
+                    player.x + player.width > coin.x &&
+                    player.y < coin.y + coin.height &&
+                    player.y + player.height > coin.y) {
+                    
+                    coin.collected = true;
+                    gameState.coins++;
+                    gameState.score += 50;
+                    
+                    // 创建金币收集特效
+                    for (let i = 0; i < 8; i++) {
+                        const angle = (i / 8) * Math.PI * 2;
+                        particles.push({
+                            x: coin.x + coin.width/2,
+                            y: coin.y + coin.height/2,
+                            vx: Math.cos(angle) * 3,
+                            vy: Math.sin(angle) * 3,
+                            life: 20,
+                            maxLife: 20,
+                            size: 2,
+                            color: '#ffd700'
+                        });
+                    }
+                }
+            }
+        }
+        
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const particle = particles[i];
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.life--;
+                
+                if (particle.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+        
+        function updateCamera() {
+            const targetX = player.x - canvas.width / 3;
+            gameState.camera.x = Math.max(0, Math.min(targetX, 2600 - canvas.width));
+        }
+        
+        function drawPlayer() {
+            const screenX = player.x - gameState.camera.x;
+            
+            // 马里奥身体
+            ctx.fillStyle = player.color;
+            ctx.fillRect(screenX, player.y, player.width, player.height);
+            
+            // 帽子
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(screenX + 5, player.y, player.width - 10, 10);
+            
+            // 眼睛
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(screenX + 8, player.y + 12, 4, 4);
+            ctx.fillRect(screenX + 18, player.y + 12, 4, 4);
+            
+            // 胡子
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(screenX + 10, player.y + 20, 10, 4);
+            
+            // 纽扣
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(screenX + 13, player.y + 28, 4, 4);
+        }
+        
+        function drawPlatforms() {
+            ctx.fillStyle = '#8B4513';
+            for (let platform of platforms) {
+                const screenX = platform.x - gameState.camera.x;
+                if (screenX + platform.width > 0 && screenX < canvas.width) {
+                    ctx.fillRect(screenX, platform.y, platform.width, platform.height);
+                    
+                    // 平台顶部草地效果
+                    ctx.fillStyle = '#90EE90';
+                    ctx.fillRect(screenX, platform.y, platform.width, 5);
+                    ctx.fillStyle = '#8B4513';
+                }
+            }
+        }
+        
+        function drawCoins() {
+            for (let coin of coins) {
+                if (coin.collected) continue;
+                
+                const screenX = coin.x - gameState.camera.x;
+                if (screenX + coin.width > 0 && screenX < canvas.width) {
+                    // 旋转动画
+                    const time = Date.now() * 0.01;
+                    const scale = Math.abs(Math.sin(time));
+                    
+                    ctx.fillStyle = '#ffd700';
+                    const centerX = screenX + coin.width/2;
+                    const centerY = coin.y + coin.height/2;
+                    const width = coin.width * scale;
+                    
+                    ctx.fillRect(centerX - width/2, centerY - coin.height/2, width, coin.height);
+                    
+                    // 金币光环
+                    ctx.strokeStyle = '#ffff00';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, coin.width/2 + 3, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
+        }
+        
+        function drawEnemies() {
+            for (let enemy of enemies) {
+                if (!enemy.alive) continue;
+                
+                const screenX = enemy.x - gameState.camera.x;
+                if (screenX + enemy.width > 0 && screenX < canvas.width) {
+                    // 敌人身体
+                    ctx.fillStyle = enemy.color;
+                    ctx.fillRect(screenX, enemy.y, enemy.width, enemy.height);
+                    
+                    // 敌人眼睛
+                    ctx.fillStyle = '#ff0000';
+                    ctx.fillRect(screenX + 5, enemy.y + 5, 4, 4);
+                    ctx.fillRect(screenX + 16, enemy.y + 5, 4, 4);
+                    
+                    // 敌人嘴巴
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect(screenX + 8, enemy.y + 15, 8, 2);
+                }
+            }
+        }
+        
+        function drawParticles() {
+            for (let particle of particles) {
+                const screenX = particle.x - gameState.camera.x;
+                const alpha = particle.life / particle.maxLife;
+                
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = particle.color;
+                ctx.fillRect(screenX - particle.size/2, particle.y - particle.size/2, particle.size, particle.size);
+                ctx.restore();
+            }
+        }
+        
+        function drawBackground() {
+            // 云朵
+            ctx.fillStyle = '#ffffff';
+            const clouds = [
+                {x: 200, y: 100}, {x: 600, y: 80}, {x: 1000, y: 120}, 
+                {x: 1400, y: 90}, {x: 1800, y: 110}, {x: 2200, y: 100}
+            ];
+            
+            for (let cloud of clouds) {
+                const screenX = cloud.x - gameState.camera.x * 0.5; // 视差效果
+                if (screenX > -100 && screenX < canvas.width + 100) {
+                    ctx.beginPath();
+                    ctx.arc(screenX, cloud.y, 30, 0, Math.PI * 2);
+                    ctx.arc(screenX + 25, cloud.y, 35, 0, Math.PI * 2);
+                    ctx.arc(screenX + 50, cloud.y, 30, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+        
+        function resetPlayerPosition() {
+            player.x = 100;
+            player.y = 300;
+            player.vx = 0;
+            player.vy = 0;
+            gameState.camera.x = 0;
+        }
+        
+        function gameOver() {
+            gameState.gameRunning = false;
+            document.getElementById('gameOver').style.display = 'block';
+            document.getElementById('gameOverText').textContent = 
+                `游戏结束!\n最终分数: ${gameState.score}\n金币收集: ${gameState.coins}`;
+        }
+        
+        function restartGame() {
+            gameState.coins = 0;
+            gameState.lives = 3;
+            gameState.score = 0;
+            gameState.gameRunning = true;
+            gameState.camera.x = 0;
+            
+            resetPlayerPosition();
+            
+            // 重置金币
+            for (let coin of coins) {
+                coin.collected = false;
+            }
+            
+            // 重置敌人
+            for (let enemy of enemies) {
+                enemy.alive = true;
+            }
+            
+            // 清空粒子
+            particles.length = 0;
+            
+            document.getElementById('gameOver').style.display = 'none';
+        }
+        
+        function updateUI() {
+            document.getElementById('coinCount').textContent = gameState.coins;
+            document.getElementById('lives').textContent = gameState.lives;
+            document.getElementById('score').textContent = gameState.score;
+        }
+        
+        function gameLoop() {
+            // 清除画布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 更新游戏逻辑
+            updatePlayer();
+            updateEnemies();
+            updateCoins();
+            updateParticles();
+            updateCamera();
+            
+            // 绘制游戏元素
+            drawBackground();
+            drawPlatforms();
+            drawCoins();
+            drawEnemies();
+            drawPlayer();
+            drawParticles();
+            
+            // 更新UI
+            updateUI();
+            
+            // 胜利条件检查
+            if (gameState.coins >= coins.length) {
+                if (gameState.gameRunning) {
+                    gameState.gameRunning = false;
+                    document.getElementById('gameOverText').textContent = 
+                        `恭喜通关!\n最终分数: ${gameState.score}\n完美收集所有金币!`;
+                    document.getElementById('gameOver').style.display = 'block';
+                }
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // 开始游戏
+        gameLoop();
+    </script>
+</body>
+</html>

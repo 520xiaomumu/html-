@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网页扫雷游戏</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"> <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            background-color: #f0f0f0; /* Apple-like light gray background */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 20px;
+            padding-bottom: 20px;
+            touch-action: manipulation;
+            color: #333;
+        }
+
+        .game-wrapper { /* New wrapper for overall centering and max-width */
+            width: 100%;
+            max-width: 500px; /* Adjust as needed */
+            padding: 15px;
+        }
+
+        .game-container {
+            background-color: #ffffff; /* White background for the game area */
+            border-radius: 12px; /* Apple-style rounded corners */
+            padding: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* Subtle shadow */
+            width: auto; /* Allow it to shrink/grow */
+            display: inline-block; /* To wrap content */
+            margin: 0 auto; /* Center the game container itself if .game-wrapper is wider */
+        }
+
+        .title-bar {
+            text-align: center;
+            font-size: 22px; /* Slightly smaller */
+            font-weight: 600; /* Semibold */
+            color: #1d1d1f; /* Apple's dark gray for text */
+            margin-bottom: 20px;
+        }
+
+        .difficulty-nav {
+            display: flex;
+            justify-content: center;
+            gap: 8px; /* Space between buttons */
+            margin-bottom: 20px;
+        }
+
+        .difficulty-nav button { /* Changed from a to button for better semantics and styling */
+            background-color: #e9e9eb;
+            color: #007aff; /* Apple blue for text */
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        .difficulty-nav button:hover {
+            background-color: #dcdce0;
+        }
+        .difficulty-nav button.active {
+            background-color: #007aff; /* Apple blue */
+            color: white;
+            font-weight: 600;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #f7f7f7; /* Lighter gray for status bar */
+            padding: 10px 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .status-text { /* Replaces led-display */
+            font-family: "SF Mono", "Menlo", "Monaco", monospace, system-ui; /* Monospaced font for numbers */
+            color: #333;
+            font-size: 1.2rem;
+            font-weight: 500;
+            background-color: #e9e9eb;
+            padding: 4px 8px;
+            border-radius: 6px;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        .reset-button {
+            width: 40px; /* Slightly larger */
+            height: 40px;
+            font-size: 22px;
+            border: none;
+            background-color: #e9e9eb;
+            color: #555;
+            border-radius: 8px; /* Consistent rounding */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        .reset-button:hover {
+            background-color: #dcdce0;
+        }
+        .reset-button:active {
+            background-color: #c8c8cc;
+        }
+
+        .grid-container {
+            display: grid;
+            border: 1px solid #dcdce0; /* Lighter border */
+            border-radius: 6px; /* Rounded corners for the grid itself */
+            overflow: hidden; /* To clip cell borders with grid radius */
+        }
+
+        .cell {
+            width: 28px; /* Slightly larger cells for a more modern feel */
+            height: 28px;
+            border: 1px solid #e0e0e0; /* Thin, light borders */
+            background-color: #f7f7f7; /* Light gray for unrevealed cells */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1rem;
+            font-weight: 500; /* Medium weight for numbers */
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.1s ease;
+        }
+        .cell:hover:not(.revealed) {
+            background-color: #ededef;
+        }
+
+        .cell.revealed {
+            background-color: #e9e9eb; /* Slightly darker for revealed */
+            border-color: #d0d0d0;
+        }
+
+        .cell.mine {
+            background-color: #ff3b30; /* Apple red for errors/mines */
+            color: white;
+        }
+        .cell.mine.revealed {
+             background-color: #ff453a;
+        }
+
+        .cell.flagged::before { content: '🚩'; font-size: 1rem; }
+        .cell.question::before { content: '?'; font-size: 1rem; color: #8e8e93; } /* Apple's secondary text color */
+
+        .cell.number-1 { color: #007aff; } /* Apple Blue */
+        .cell.number-2 { color: #34c759; } /* Apple Green */
+        .cell.number-3 { color: #ff3b30; } /* Apple Red */
+        .cell.number-4 { color: #5856d6; } /* Apple Indigo */
+        .cell.number-5 { color: #a2845e; } /* Brownish, less vibrant */
+        .cell.number-6 { color: #5ac8fa; } /* Apple Teal */
+        .cell.number-7 { color: #8e8e93; } /* Apple Gray */
+        .cell.number-8 { color: #5c5c5c; } /* Darker Gray */
+
+        .leaderboard-link-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .leaderboard-link-container a {
+            color: #007aff; /* Apple blue */
+            text-decoration: none; /* No underline by default for links */
+            font-size: 0.9rem;
+        }
+        .leaderboard-link-container a:hover {
+            text-decoration: underline;
+        }
+
+        .modal { /* Styles for backdrop remain */ }
+        .modal.active { /* Styles for active backdrop remain */ }
+        .modal-content {
+            background-color: #fdfdfd; /* Slightly off-white for modal */
+            padding: 25px;
+            border-radius: 14px; /* Apple modal rounding */
+            color: #1d1d1f;
+            border: none; /* Remove old border */
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            min-width: 320px;
+        }
+        .modal-content h2 { font-size: 1.3rem; margin-bottom: 10px; font-weight: 600; }
+        .modal-content p { font-size: 0.95rem; margin-bottom: 20px; color: #666; }
+        .modal-content input[type="text"] {
+            border: 1px solid #c6c6c8;
+            padding: 8px 10px; margin-bottom: 20px; width: 100px; text-align: center;
+            font-family: system-ui; font-size: 1rem; text-transform: uppercase;
+            border-radius: 8px;
+            background-color: #fff;
+        }
+        .btn-modal {
+            padding: 10px 20px; font-size: 0.95rem; cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: background-color 0.2s ease, opacity 0.2s ease;
+        }
+        .btn-modal.primary { /* For main actions like Submit Score */
+            background-color: #007aff;
+            color: white;
+        }
+        .btn-modal.primary:hover { background-color: #005ecb; }
+        .btn-modal.secondary { /* For actions like Restart, Close */
+            background-color: #e9e9eb;
+            color: #007aff;
+        }
+        .btn-modal.secondary:hover { background-color: #dcdce0; }
+
+
+        #leaderboard-modal .modal-content { width: auto; max-width: 450px; }
+        .leaderboard-section { margin-bottom: 15px; }
+        .leaderboard-section h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 10px; color: #333;}
+        .leaderboard-entry { display: flex; justify-content: space-between; padding: 4px 0; font-family: "SF Mono", "Menlo", monospace, system-ui; font-size: 1rem;}
+
+        @media (max-width: 600px) {
+            .game-wrapper { padding: 10px; }
+            .game-container { padding: 10px; }
+            .title-bar { font-size: 20px; margin-bottom: 15px; }
+            .difficulty-nav { gap: 6px; margin-bottom: 15px; }
+            .difficulty-nav button { padding: 7px 12px; font-size: 0.85rem; }
+            .status-bar { padding: 8px 10px; }
+            .status-text { font-size: 1rem; padding: 3px 6px; min-width: 40px;}
+            .reset-button { width: 36px; height: 36px; font-size: 20px; }
+            .cell { width: 26px; height: 26px; font-size: 0.9rem; } /* Adjust cell size for mobile */
+            .leaderboard-link-container { margin-top: 15px; }
+            .modal-content { padding: 20px; min-width: 280px; }
+            .modal-content h2 { font-size: 1.2rem; }
+            .modal-content p { font-size: 0.9rem; }
+            .modal-content input[type="text"] { width: 90px; }
+            .btn-modal { padding: 8px 16px; font-size: 0.9rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-wrapper"> <div class="game-container">
+            <div class="title-bar">网页扫雷游戏</div>
+            <div class="difficulty-nav">
+                <button id="easy-link">基础</button>
+                <button id="medium-link">中级</button>
+                <button id="hard-link">专家</button>
+            </div>
+            <div class="status-bar">
+                <div id="mines-left" class="status-text">000</div>
+                <button id="reset-button" class="reset-button">😊</button>
+                <div id="timer" class="status-text">000</div>
+            </div>
+            <div id="game-board" class="grid-container"></div>
+            <div class="leaderboard-link-container">
+                <a id="leaderboard-link" href="#">成绩榜</a>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-over-modal" class="modal">
+        <div class="modal-content">
+            <h2 id="modal-title">游戏结束!</h2>
+            <p id="modal-message">你踩到雷了!</p>
+            <div id="player-name-input-container" style="display: none;">
+                <p>请输入你的名字 (3个大写字母):</p>
+                <input type="text" id="player-name" maxlength="3" pattern="[A-Z]{3}">
+            </div>
+            <button id="modal-submit-score-button" class="btn-modal primary" style="display: none;">提交成绩</button>
+            <button id="modal-restart-button" class="btn-modal secondary">重新开始</button>
+        </div>
+    </div>
+
+    <div id="leaderboard-modal" class="modal">
+        <div class="modal-content">
+            <h2>成绩榜</h2>
+            <div id="leaderboard-content">
+                <p>正在加载成绩...</p>
+            </div>
+            <button id="leaderboard-close-button" class="btn-modal secondary">关闭</button>
+        </div>
+    </div>
+
+    <script type="module">
+        // Firebase SDK imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Sound Effects ---
+        let audioStarted = false;
+        const sounds = {};
+
+        function initSounds() {
+            if (typeof Tone === 'undefined') { console.warn("Tone.js not loaded."); return; }
+            sounds.click = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0.01, release: 0.1 } }).toDestination();
+            sounds.flag = new Tone.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.005, decay: 0.05, sustain: 0.01, release: 0.1 } }).toDestination();
+            sounds.explosion = new Tone.NoiseSynth({ noise: { type: "pink" }, envelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 0.2 } }).toDestination();
+            sounds.win = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "pwm", modulationFrequency: 0.2 }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.5 } }).toDestination();
+            sounds.newGame = new Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 2, envelope: { attack: 0.001, decay: 0.1, sustain: 0.001, release: 0.1 } }).toDestination();
+            sounds.lose = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.1 } }).toDestination();
+            Object.values(sounds).forEach(s => s.volume.value -= 10);
+            sounds.explosion.volume.value = -5; sounds.win.volume.value = -8; sounds.lose.volume.value = -6;
+        }
+
+        async function startAudioContext() {
+            if (typeof Tone === 'undefined' || audioStarted) return;
+            try { await Tone.start(); audioStarted = true; console.log("Audio context started."); initSounds(); }
+            catch (e) { console.error("Could not start audio context:", e); }
+        }
+
+        function playSound(soundName, noteOrTime = "8n", customTimeOffset) {
+            if (!audioStarted || !sounds[soundName] || typeof Tone === 'undefined') return;
+
+            const playTime = customTimeOffset !== undefined ? customTimeOffset : Tone.now();
+
+            try {
+                if (soundName === 'click') sounds.click.triggerAttackRelease("C5", noteOrTime, playTime);
+                else if (soundName === 'flag') sounds.flag.triggerAttackRelease("E5", noteOrTime, playTime);
+                else if (soundName === 'explosion') sounds.explosion.triggerAttackRelease(noteOrTime, playTime);
+                else if (soundName === 'win') sounds.win.triggerAttackRelease(["C4", "E4", "G4", "C5"], noteOrTime, playTime);
+                else if (soundName === 'newGame') {
+                    // For newGame, always ensure it's slightly in the future to avoid rapid re-trigger errors
+                    sounds.newGame.triggerAttackRelease("C2", noteOrTime, Tone.now() + 0.005); // Use Tone.now() + small offset
+                }
+                else if (soundName === 'lose') sounds.lose.triggerAttackRelease("A2", "4n", playTime);
+            } catch (e) {
+                console.error(`Error playing sound ${soundName}:`, e);
+            }
+        }
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "YOUR_API_KEY", authDomain: "YOUR_AUTH_DOMAIN", projectId: "YOUR_PROJECT_ID" };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'minesweeper-appleui-app';
+
+        let app; let auth; let db; let userId;
+
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            setLogLevel('debug');
+            onAuthStateChanged(auth, async (user) => {
+                if (user) { userId = user.uid; }
+                else {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+                        else await signInAnonymously(auth);
+                    } catch (error) { console.error("Sign-in error:", error); }
+                }
+                initGame();
+            });
+        } catch (error) { console.error("Firebase init error:", error); alert("排行榜服务不可用。"); initGame(); }
+
+        const difficulties = {
+            easy: { rows: 9, cols: 9, mines: 10, name: "基础" },
+            medium: { rows: 16, cols: 16, mines: 40, name: "中级" },
+            hard: { rows: 16, cols: 30, mines: 99, name: "专家" }
+        };
+        let currentDifficultyKey = 'easy';
+        let rows, cols, numMines;
+
+        const gameBoard = document.getElementById('game-board');
+        const minesLeftDisplay = document.getElementById('mines-left');
+        const timerDisplay = document.getElementById('timer');
+        const resetButton = document.getElementById('reset-button');
+        const gameOverModal = document.getElementById('game-over-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalMessage = document.getElementById('modal-message');
+        const playerNameInputContainer = document.getElementById('player-name-input-container');
+        const playerNameInput = document.getElementById('player-name');
+        const modalSubmitScoreButton = document.getElementById('modal-submit-score-button');
+        const modalRestartButton = document.getElementById('modal-restart-button');
+        const leaderboardModal = document.getElementById('leaderboard-modal');
+        const leaderboardContent = document.getElementById('leaderboard-content');
+        const leaderboardCloseButton = document.getElementById('leaderboard-close-button');
+        const difficultyButtons = {
+            easy: document.getElementById('easy-link'),
+            medium: document.getElementById('medium-link'),
+            hard: document.getElementById('hard-link'),
+        };
+        const leaderboardLink = document.getElementById('leaderboard-link');
+
+        let board = [];
+        let revealedCells = 0;
+        let flaggedCount = 0;
+        let timeLeft = 0;
+        let timerInterval;
+        let gameOver = false;
+        let firstClick = true;
+        let leftMouseDown = false;
+
+        function initGame() {
+            startAudioContext();
+            playSound('newGame', '4n'); // Pass only sound name and duration
+
+            const selectedDiffKey = currentDifficultyKey;
+            let diffToUse = difficulties[selectedDiffKey];
+
+            if (!diffToUse) {
+                console.warn(`[INIT_GAME_WARN] No settings found for key "${selectedDiffKey}". Defaulting to 'easy'.`);
+                diffToUse = difficulties.easy;
+            }
+
+            if (!diffToUse || typeof diffToUse.mines === 'undefined') {
+                console.error(`[INIT_GAME_ERROR] Critical error: diffToUse or diffToUse.mines is undefined even after fallback for key "${selectedDiffKey}". Using hardcoded easy defaults.`);
+                rows = 9;
+                cols = 9;
+                numMines = 10;
+                if (currentDifficultyKey !== 'easy') {
+                    currentDifficultyKey = 'easy';
+                }
+            } else {
+                rows = diffToUse.rows;
+                cols = diffToUse.cols;
+                numMines = diffToUse.mines;
+            }
+            console.log(`[INIT_GAME_FINAL_VALUES] rows: ${rows}, cols: ${cols}, numMines: ${numMines} (type: ${typeof numMines}) for key: ${currentDifficultyKey}`);
+
+            gameOver = false; firstClick = true; revealedCells = 0; flaggedCount = 0; timeLeft = 0;
+            resetButton.textContent = '😊';
+            updateMinesLeftDisplay();
+            updateTimerDisplay();
+            clearInterval(timerInterval);
+            gameOverModal.classList.remove('active');
+            playerNameInputContainer.style.display = 'none';
+            modalSubmitScoreButton.style.display = 'none';
+            playerNameInput.value = '';
+
+            Object.values(difficultyButtons).forEach(button => button.classList.remove('active'));
+            if (difficultyButtons[currentDifficultyKey]) {
+                 difficultyButtons[currentDifficultyKey].classList.add('active');
+            } else {
+                console.warn(`[INIT_GAME_WARN] No button found for currentDifficultyKey: "${currentDifficultyKey}" after setting parameters.`);
+            }
+
+            createBoard(); renderBoard();
+        }
+
+        function updateMinesLeftDisplay() {
+            const currentNumMines = Number(numMines);
+            if (isNaN(currentNumMines)) {
+                console.error("[DEBUG] updateMinesLeftDisplay - currentNumMines is NaN! Defaulting to 0 for display. Original numMines was:", numMines);
+                minesLeftDisplay.textContent = String(0 - flaggedCount).padStart(3, '0');
+            } else {
+                minesLeftDisplay.textContent = String(currentNumMines - flaggedCount).padStart(3, '0');
+            }
+        }
+
+        function updateTimerDisplay() { timerDisplay.textContent = String(timeLeft).padStart(3, '0'); }
+
+        function createBoard() {
+            board = Array.from({ length: rows }, () =>
+                Array.from({ length: cols }, () => ({ isMine: false, isRevealed: false, isFlagged: false, isQuestion: false, adjacentMines: 0 }))
+            );
+        }
+        function placeMines(firstClickRow, firstClickCol) {
+            let minesPlaced = 0;
+            while (minesPlaced < numMines) {
+                const r = Math.floor(Math.random() * rows);
+                const c = Math.floor(Math.random() * cols);
+                if (!board[r][c].isMine && (r !== firstClickRow || c !== firstClickCol)) {
+                    board[r][c].isMine = true; minesPlaced++;
+                }
+            }
+            for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+                if (!board[r][c].isMine) board[r][c].adjacentMines = countAdjacentMines(r, c);
+            }
+        }
+        function renderBoard() {
+            gameBoard.innerHTML = '';
+            const cellSize = window.innerWidth < 600 ? 26 : 28;
+            const gridContainer = document.getElementById('game-board');
+            gridContainer.style.width = `${cols * cellSize}px`;
+
+            gameBoard.style.gridTemplateColumns = `repeat(${cols}, ${cellSize}px)`;
+            gameBoard.style.gridTemplateRows = `repeat(${rows}, ${cellSize}px)`;
+
+            for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                cell.dataset.row = r; cell.dataset.col = c;
+                updateCellDisplay(cell, r, c);
+                cell.addEventListener('mousedown', (e) => handleMouseDown(e, r, c));
+                cell.addEventListener('mouseup', (e) => handleMouseUp(e, r, c));
+                cell.addEventListener('mouseleave', () => { if (!gameOver && !firstClick && leftMouseDown) resetButton.textContent = '😊'; });
+                cell.addEventListener('contextmenu', (e) => { e.preventDefault(); handleCellRightClick(r, c); });
+                let touchTimer, touchStartX, touchStartY;
+                cell.addEventListener('touchstart', (e) => {
+                    if (gameOver) return; startAudioContext();
+                    touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY;
+                    handleMouseDown({button:0}, r, c);
+                    touchTimer = setTimeout(() => { e.preventDefault(); handleCellRightClick(r,c); leftMouseDown = false; }, 500);
+                }, {passive: false});
+                cell.addEventListener('touchend', (e) => {
+                    clearTimeout(touchTimer);
+                    if(!e.defaultPrevented && leftMouseDown){ handleMouseUp({button:0}, r,c); }
+                    if (!gameOver) resetButton.textContent = '😊'; leftMouseDown = false;
+                });
+                cell.addEventListener('touchmove', (e) => {
+                    if (Math.abs(e.touches[0].clientX - touchStartX) > 10 || Math.abs(e.touches[0].clientY - touchStartY) > 10) clearTimeout(touchTimer);
+                });
+                gameBoard.appendChild(cell);
+            }
+        }
+
+        function handleMouseDown(event, r, c) {
+            startAudioContext();
+            if (gameOver || (board[r][c].isRevealed && !board[r][c].isMine) ) return;
+            if (event.button === 0) { leftMouseDown = true; resetButton.textContent = '😮'; }
+        }
+        function handleMouseUp(event, r, c) {
+            if (leftMouseDown && event.button === 0 && !gameOver) {
+                if (!board[r][c].isRevealed || board[r][c].isMine) handleCellClick(r, c);
+            }
+            if (!gameOver) resetButton.textContent = '😊'; leftMouseDown = false;
+        }
+        function updateCellDisplay(cellElement, r, c) {
+            const cellData = board[r][c];
+            for (let i = 1; i <= 8; i++) cellElement.classList.remove(`number-${i}`);
+            cellElement.classList.remove('revealed', 'mine', 'flagged', 'question');
+            cellElement.textContent = '';
+            const cellSize = window.innerWidth < 600 ? 26 : 28;
+            cellElement.style.width = `${cellSize}px`; cellElement.style.height = `${cellSize}px`;
+            if (cellData.isRevealed) {
+                cellElement.classList.add('revealed');
+                if (cellData.isMine) { cellElement.classList.add('mine'); cellElement.textContent = '💣'; }
+                else if (cellData.adjacentMines > 0) { cellElement.textContent = cellData.adjacentMines; cellElement.classList.add(`number-${cellData.adjacentMines}`); }
+            } else {
+                if (cellData.isFlagged) cellElement.classList.add('flagged');
+                else if (cellData.isQuestion) cellElement.classList.add('question');
+            }
+        }
+        function handleCellClick(r, c) {
+            startAudioContext();
+            if (gameOver || board[r][c].isRevealed || board[r][c].isFlagged) return;
+            if (firstClick) { placeMines(r, c); firstClick = false; startTimer(); }
+            const cellData = board[r][c];
+            cellData.isRevealed = true; revealedCells++;
+            if (cellData.isMine) {
+                playSound('explosion', '2n');
+                const clickedMineCell = gameBoard.querySelector(`[data-row='${r}'][data-col='${c}']`);
+                if(clickedMineCell) { clickedMineCell.style.backgroundColor = '#ff3b30'; clickedMineCell.textContent = '💥';}
+                revealAllMines(r,c); endGame(false); return;
+            } else { playSound('click', '16n'); }
+            const cellElement = gameBoard.querySelector(`[data-row='${r}'][data-col='${c}']`);
+            updateCellDisplay(cellElement, r, c);
+            if (cellData.adjacentMines === 0) revealAdjacentCells(r, c);
+            checkWinCondition();
+        }
+        function handleCellRightClick(r, c) {
+            startAudioContext();
+            if (gameOver || board[r][c].isRevealed) return;
+            if (firstClick) { placeMines(r,c); firstClick = false; startTimer(); }
+            const cellData = board[r][c];
+            const cellElement = gameBoard.querySelector(`[data-row='${r}'][data-col='${c}']`);
+            if (!cellData.isFlagged && !cellData.isQuestion) { cellData.isFlagged = true; flaggedCount++; playSound('flag', '16n'); }
+            else if (cellData.isFlagged) { cellData.isFlagged = false; cellData.isQuestion = true; flaggedCount--; playSound('flag', '16n', Tone.now() + 0.05); }
+            else if (cellData.isQuestion) { cellData.isQuestion = false; playSound('click', '16n');}
+            updateMinesLeftDisplay(); updateCellDisplay(cellElement, r, c); checkWinCondition();
+        }
+        function countAdjacentMines(r, c) {
+            let count = 0;
+            for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+                if (i === 0 && j === 0) continue;
+                const newR = r + i, newC = c + j;
+                if (newR >= 0 && newR < rows && newC >= 0 && newC < cols && board[newR][newC].isMine) count++;
+            }
+            return count;
+        }
+        function revealAdjacentCells(r, c) {
+            for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+                if (i === 0 && j === 0) continue;
+                const newR = r + i, newC = c + j;
+                if (newR >= 0 && newR < rows && newC >= 0 && newC < cols) {
+                    const adj = board[newR][newC];
+                    if (!adj.isRevealed && !adj.isFlagged && !adj.isMine) {
+                        adj.isRevealed = true; revealedCells++;
+                        const el = gameBoard.querySelector(`[data-row='${newR}'][data-col='${newC}']`);
+                        updateCellDisplay(el, newR, newC);
+                        if (adj.adjacentMines === 0) revealAdjacentCells(newR, newC);
+                    }
+                }
+            }
+        }
+        function revealAllMines(clickedRow, clickedCol) {
+            for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+                const cellData = board[r][c], el = gameBoard.querySelector(`[data-row='${r}'][data-col='${c}']`);
+                if (cellData.isMine) { if (!(r === clickedRow && c === clickedCol)) { cellData.isRevealed = true; updateCellDisplay(el, r, c);}}
+                else if (cellData.isFlagged && !cellData.isMine) { if(el) {el.classList.add('revealed'); el.textContent = '❌'; el.style.color = 'black';}}
+            }
+        }
+        function checkWinCondition() { if (revealedCells === (rows * cols - numMines) && !gameOver) endGame(true); }
+
+        const leaderboardDocPath = `/artifacts/${appId}/public/data/minesweeper_leaderboard/scores`;
+        async function saveScore(difficultyKey, playerName, time) {
+            if (!db || !userId || difficultyKey === 'custom') return;
+            const leaderboardRef = doc(db, leaderboardDocPath);
+            try {
+                const docSnap = await getDoc(leaderboardRef);
+                let scores = docSnap.exists() ? docSnap.data() : {};
+                scores[difficultyKey] = scores[difficultyKey] || [];
+                scores[difficultyKey].push({ name: playerName, time: time });
+                scores[difficultyKey].sort((a, b) => a.time - b.time).splice(3);
+                await setDoc(leaderboardRef, scores, { merge: true });
+            } catch (error) { console.error("Error saving score:", error); }
+        }
+        async function displayLeaderboard() {
+            startAudioContext();
+            if (!db) { leaderboardContent.innerHTML = "<p>排行榜服务当前不可用。</p>"; leaderboardModal.classList.add('active'); return; }
+            leaderboardContent.innerHTML = "<p>正在加载成绩...</p>"; leaderboardModal.classList.add('active');
+            try {
+                const docSnap = await getDoc(doc(db, leaderboardDocPath));
+                let contentHtml = '';
+                if (docSnap.exists()) {
+                    const allScores = docSnap.data();
+                    ['easy', 'medium', 'hard'].forEach(diffKey => {
+                        const diffData = difficulties[diffKey];
+                        contentHtml += `<div class="leaderboard-section"><h3>${diffData.name} (${diffData.rows}x${diffData.cols}, ${diffData.mines}雷)</h3>`;
+                        const scoresForDiff = allScores[diffKey];
+                        if (scoresForDiff && scoresForDiff.length > 0) {
+                            scoresForDiff.forEach((score, index) => {
+                                contentHtml += `<div class="leaderboard-entry"><span>${index + 1}. ${score.name.padEnd(3, ' ')}</span> <span>${String(score.time).padStart(3, '0')} 秒</span></div>`;
+                            });
+                        } else { contentHtml += "<p>暂无记录</p>"; }
+                        contentHtml += "</div>";
+                    });
+                } else { contentHtml = "<p>还没有任何成绩记录。</p>"; }
+                leaderboardContent.innerHTML = contentHtml;
+            } catch (error) { console.error("Error fetching leaderboard:", error); leaderboardContent.innerHTML = "<p>加载成绩失败。</p>"; }
+        }
+
+        async function endGame(isWin) {
+            gameOver = true; clearInterval(timerInterval);
+            modalRestartButton.style.display = 'inline-block';
+            if (isWin) {
+                playSound('win', '2n'); resetButton.textContent = '😎';
+                modalTitle.textContent = '恭喜你!'; modalMessage.textContent = `用时: ${timeLeft} 秒。`;
+                if (currentDifficultyKey !== 'custom' && db && userId) {
+                    playerNameInputContainer.style.display = 'block';
+                    modalSubmitScoreButton.style.display = 'inline-block';
+                    modalRestartButton.style.display = 'none';
+                    playerNameInput.focus();
+                } else {
+                    modalSubmitScoreButton.style.display = 'none';
+                    playerNameInputContainer.style.display = 'none';
+                }
+                for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+                    if (board[r][c].isMine && !board[r][c].isFlagged) {
+                        board[r][c].isFlagged = true;
+                        updateCellDisplay(gameBoard.querySelector(`[data-row='${r}'][data-col='${c}']`), r, c);
+                    }
+                }
+                flaggedCount = numMines; updateMinesLeftDisplay();
+            } else {
+                playSound('lose', '4n'); resetButton.textContent = '😵';
+                modalTitle.textContent = '游戏失败!'; modalMessage.textContent = '你踩到雷了!';
+                playerNameInputContainer.style.display = 'none';
+                modalSubmitScoreButton.style.display = 'none';
+            }
+            gameOverModal.classList.add('active');
+        }
+
+        function startTimer() {
+            if(timerInterval) clearInterval(timerInterval);
+            timeLeft = 0; updateTimerDisplay();
+            timerInterval = setInterval(() => { if (timeLeft < 999) { timeLeft++; updateTimerDisplay(); } else clearInterval(timerInterval); }, 1000);
+        }
+
+        resetButton.addEventListener('click', () => { startAudioContext(); initGame(); });
+        modalSubmitScoreButton.addEventListener('click', async () => {
+            let playerName = playerNameInput.value.trim().toUpperCase();
+            if (!/^[A-Z]{3}$/.test(playerName)) playerName = "AAA";
+            await saveScore(currentDifficultyKey, playerName, timeLeft);
+            playerNameInputContainer.style.display = 'none';
+            modalSubmitScoreButton.style.display = 'none';
+            modalRestartButton.style.display = 'inline-block';
+            initGame();
+        });
+        modalRestartButton.addEventListener('click', () => { gameOverModal.classList.remove('active'); initGame(); });
+
+        Object.keys(difficultyButtons).forEach(key => {
+            difficultyButtons[key].addEventListener('click', (e) => {
+                e.preventDefault();
+                startAudioContext();
+                currentDifficultyKey = key;
+                initGame();
+            });
+        });
+
+        leaderboardLink.addEventListener('click', (e) => { e.preventDefault(); displayLeaderboard(); });
+        leaderboardCloseButton.addEventListener('click', () => { leaderboardModal.classList.remove('active'); });
+    </script>
+</body>
+</html>
