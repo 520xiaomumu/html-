@@ -1,0 +1,1963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生命游戏（优化版）</title>
+    <style>
+        :root {
+            --primary-color: #3498db;
+            --secondary-color: #2980b9;
+            --danger-color: #e74c3c;
+            --success-color: #2ecc71;
+            --warning-color: #f39c12;
+            --info-color: #00ffff;
+            --light-text: #ecf0f1;
+            --dark-bg: rgba(0,0,0,0.1);
+            --panel-bg: rgba(255,255,255,0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: var(--light-text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 12px;
+            margin-bottom: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.18);
+        }
+
+        .game-rules h3, .keyboard-shortcuts h3 {
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+
+        .rules-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+            padding: 0 8px;
+        }
+
+        .rule-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+            padding: 14px 18px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .rule-item:hover {
+            background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+
+        .rule-item span:first-child {
+            font-size: 1.2em;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+        }
+
+        .shortcuts-grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .shortcut-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--dark-bg);
+            padding: 8px 12px;
+            border-radius: 20px;
+        }
+
+        .shortcut-item kbd {
+            background: var(--secondary-color);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+
+        .game-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .grid-container {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            min-height: 70vh;
+            width: 100%;
+        }
+
+        .grid {
+            display: grid;
+            gap: 1px;
+            background-color: rgba(0,0,0,0.3);
+            border: 3px solid rgba(0,0,0,0.3);
+            border-radius: 10px;
+            position: relative;
+        }
+
+        #infiniteCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
+            cursor: grab;
+            background-color: #1a202c;
+        }
+
+        #infiniteCanvas:active {
+            cursor: grabbing;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .grid.drawing-mode { border-color: var(--warning-color); }
+        .grid.running-mode { border-color: var(--danger-color); }
+        .grid.pasting-mode { cursor: copy; }
+
+        .cell {
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 2px;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+        }
+
+        .cell.alive { background-color: var(--danger-color); }
+        .cell.preview { background-color: rgba(46,204,113,0.6) !important; }
+        .cell:hover { transform: scale(1.2); z-index: 1; }
+
+        .controls-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .controls-row {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .btn.danger { background: var(--danger-color); }
+        .btn.success { background: var(--success-color); }
+        .btn.warning { background: var(--warning-color); }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-group input, .input-group select {
+            padding: 4px 8px;
+            border-radius: 15px;
+            border: 2px solid rgba(255,255,255,0.3);
+            background: var(--panel-bg);
+            color: white;
+            font-size: 13px;
+        }
+
+        .input-group select {
+            appearance: none;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8"><path fill="white" d="M6 8L0 0h12z"/></svg>');
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 35px;
+        }
+
+        .input-group select option {
+            background-color: #2c3e50;
+            color: white;
+        }
+
+        .category-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .category-tab {
+            background: var(--dark-bg);
+            padding: 4px 8px;
+            border-radius: 15px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .category-tab.active {
+            background: var(--primary-color);
+            border-color: var(--light-text);
+        }
+
+        .pattern-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 16px;
+            max-height: 280px;
+            overflow-y: auto;
+            padding: 12px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.3) transparent;
+        }
+
+        .pattern-grid::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .pattern-grid::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+        }
+
+        .pattern-grid::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 3px;
+        }
+
+        .pattern-grid::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.5);
+        }
+
+        .pattern-card {
+            background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+            padding: 14px;
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            cursor: grab;
+            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .pattern-card:hover {
+            background: linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08));
+            transform: translateY(-4px) scale(1.02);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+            border-color: rgba(255,255,255,0.25);
+        }
+
+        .pattern-card.dragging {
+            opacity: 0.7;
+            transform: rotate(5deg) scale(1.05);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+        }
+
+        .pattern-preview {
+            width: 55px;
+            height: 55px;
+            margin: 0 auto 10px;
+            display: grid;
+            gap: 1.5px;
+            background: linear-gradient(135deg, rgba(0,0,0,0.4), rgba(0,0,0,0.2));
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            backdrop-filter: blur(3px);
+            transition: all 0.2s ease;
+        }
+
+        .pattern-preview .mini-cell {
+            background: rgba(255,255,255,0.25);
+            border-radius: 2px;
+            transition: all 0.15s ease;
+        }
+
+        .pattern-preview .mini-cell.alive {
+            background: linear-gradient(135deg, var(--danger-color), #ff6b6b);
+            box-shadow: 0 0 4px rgba(255,107,107,0.5);
+        }
+
+        .pattern-card:hover .pattern-preview {
+            background: linear-gradient(135deg, rgba(0,0,0,0.5), rgba(0,0,0,0.3));
+            border-color: rgba(255,255,255,0.25);
+            transform: scale(1.05);
+        }
+
+        .pattern-name {
+            font-size: 0.85em;
+            margin-bottom: 10px;
+            color: rgba(255,255,255,0.95);
+            font-weight: 600;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            letter-spacing: 0.3px;
+        }
+
+        .pattern-actions {
+            display: flex;
+            justify-content: space-around;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .pattern-action-btn {
+            background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+            border: 1px solid rgba(255,255,255,0.25);
+            color: var(--light-text);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 32px;
+            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+            backdrop-filter: blur(5px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .pattern-action-btn:hover {
+            background: linear-gradient(135deg, rgba(255,255,255,0.2), rgba(255,255,255,0.1));
+            border-color: rgba(255,255,255,0.4);
+            transform: translateY(-2px) scale(1.1);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .pattern-action-btn:active {
+            transform: translateY(0) scale(0.95);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+        }
+
+        .ghost-preview {
+            position: fixed;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0.75;
+            transform: translate(-50%, -50%);
+        }
+
+        .ghost-preview .pattern-preview {
+            transform-origin: center center;
+        }
+
+        .selection-box {
+            position: absolute;
+            border: 2px dashed var(--info-color);
+            pointer-events: none;
+            z-index: 10;
+            background: rgba(0,255,255,0.1);
+            overflow: hidden;
+        }
+
+        .highlight-cell {
+            position: absolute;
+            background-color: var(--danger-color);
+            border-radius: 2px;
+            opacity: 0.9;
+        }
+
+        #contextMenu {
+            position: fixed;
+            z-index: 10000;
+            width: 120px;
+            height: 120px;
+            pointer-events: none;
+            display: none;
+        }
+
+        #contextMenu.show {
+            display: block;
+        }
+
+        .context-menu-item {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(44,62,80,0.85);
+            backdrop-filter: blur(5px);
+            border: 1px solid var(--light-text);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.3s cubic-bezier(0.18,0.89,0.32,1.28), background-color 0.2s;
+            pointer-events: all;
+            font-size: 20px;
+        }
+
+        .context-menu-item:hover {
+            background-color: var(--primary-color);
+            transform: scale(1.15) !important;
+        }
+
+        #contextMenu.show .menu-item-1 { transform: translateY(-55px); }
+        #contextMenu.show .menu-item-2 { transform: rotate(72deg) translateY(-55px) rotate(-72deg); }
+        #contextMenu.show .menu-item-3 { transform: rotate(144deg) translateY(-55px) rotate(-144deg); }
+        #contextMenu.show .menu-item-4 { transform: rotate(216deg) translateY(-55px) rotate(-216deg); }
+        #contextMenu.show .menu-item-5 { transform: rotate(288deg) translateY(-55px) rotate(-288deg); }
+        #contextMenu.show .menu-item-6 { transform: rotate(180deg) translateY(-55px) rotate(-180deg); }
+
+        #saveModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #saveModal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 500px;
+            width: 90%;
+            position: relative;
+        }
+
+        .modal-content .close {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 28px;
+            cursor: pointer;
+        }
+
+        #savedStatesList {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--success-color);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            z-index: 1001;
+            transform: translateX(120%);
+            transition: transform 0.5s cubic-bezier(0.68,-0.55,0.27,1.55);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🧬 生命游戏</h1>
+            <p>探索细胞自动机的演化奥秘</p>
+        </header>
+
+        <div class="panel game-rules">
+            <h3>🎮 游戏规则</h3>
+            <div class="rules-content">
+                <div class="rule-item"><span>🎯</span><span><b>怎么玩:</b> 点击小格子创造生命，拖拽鼠标画出图案，或者选择下面的预设图案快速开始冒险！</span></div>
+                <div id="rule-survival" class="rule-item"><span>❤️</span><span><b>生命存活:</b> 小生命身边有2-3个好朋友时会继续快乐生活。</span></div>
+                <div id="rule-birth" class="rule-item"><span>🌱</span><span><b>新生命诞生:</b> 空格子周围正好有3个生命朋友时，会诞生一个新的小生命！</span></div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="game-stats" id="statsPanel">
+                <div><div class="stat-value" id="generation">0</div><div class="stat-label">世代</div></div>
+                <div><div class="stat-value" id="population">0</div><div class="stat-label">活细胞</div></div>
+                <div><div class="stat-value" id="maxPopulation">0</div><div class="stat-label">最大种群</div></div>
+                <div><div class="stat-value" id="maxPopulationGeneration">0</div><div class="stat-label">最大种群代</div></div>
+            </div>
+        </div>
+
+        <div class="panel patterns-panel">
+            <h3>🎨 图案库 (可拖拽)</h3>
+            <div class="category-tabs" id="categoryTabs"></div>
+            <div class="pattern-grid" id="patternGrid"></div>
+        </div>
+
+        <div class="grid-container" id="gridContainer">
+            <div id="grid" class="grid"></div>
+            <canvas id="infiniteCanvas" class="hidden"></canvas>
+        </div>
+
+        <div class="panel controls-panel">
+            <div class="controls-row">
+                <button id="playPauseBtn" class="btn success">▶️ 开始</button>
+                <button id="stepBtn" class="btn">⏭️ 单步</button>
+                <button id="undoBtn" class="btn">⏪ 撤销</button>
+                <button id="resetBtn" class="btn danger">🔄 重置</button>
+                <button id="randomBtn" class="btn">🎲 随机</button>
+            </div>
+            <div class="controls-row">
+                <div class="input-group">
+                    <label for="speed">速度:</label>
+                    <input type="range" id="speed" min="1" max="100" value="5" step="1">
+                    <span id="speedValue">5 世代/秒</span>
+                </div>
+                <div class="input-group">
+                    <label for="gridSize">网格空间:</label>
+                    <select id="gridSize">
+                        <option value="30,50,false">无界小 (30x50)</option>
+                        <option value="30,50,true">有界小 (30x50)</option>
+                        <option value="60,80,false">无界中 (60x80)</option>
+                        <option value="60,80,true">有界中 (60x80)</option>
+                        <option value="80,100,false" selected>无界大 (80x100)</option>
+                        <option value="80,100,true">有界大 (80x100)</option>
+                        <option value="infinite,,">🌌 无限宇宙</option>
+                    </select>
+                </div>
+            </div>
+            <div class="controls-row">
+                <button id="drawModeBtn" class="btn">✏️ 绘图</button>
+                <button id="saveBtn" class="btn">💾 存档</button>
+                <button id="loadBtn" class="btn">📁 读档</button>
+                <button id="exportBtn" class="btn">📤 导出</button>
+                <button id="fullscreenBtn" class="btn">🔍 全屏</button>
+            </div>
+            <div class="controls-row">
+                <div class="input-group">
+                    <label for="ruleS">存活 (S):</label>
+                    <input type="text" id="ruleS" value="23" title="一个细胞要存活，周围需要有多少个邻居 (例如: 23)" maxlength="8">
+                </div>
+                <div class="input-group">
+                    <label for="ruleB">诞生 (B):</label>
+                    <input type="text" id="ruleB" value="3" title="一个死细胞要复活，周围需要有多少个邻居 (例如: 3)" maxlength="8">
+                </div>
+            </div>
+        </div>
+
+        <div class="panel keyboard-shortcuts">
+            <h3>⌨️ 快捷鍵</h3>
+            <div class="shortcuts-grid">
+                <div class="shortcut-item"><kbd>空格</kbd><span>开始/暂停</span></div>
+                <div class="shortcut-item"><kbd>C</kbd><span>清空</span></div>
+                <div class="shortcut-item"><kbd>R</kbd><span>随机</span></div>
+                <div class="shortcut-item"><kbd>→</kbd><span>单步</span></div>
+                <div class="shortcut-item"><kbd>←</kbd><span>撤销</span></div>
+                <div class="shortcut-item"><kbd>↑</kbd><span>减速</span></div>
+                <div class="shortcut-item"><kbd>↓</kbd><span>加速</span></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="saveModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h3>管理游戏状态</h3>
+            <div class="input-group" style="margin: 20px 0;">
+                <input type="text" id="saveName" placeholder="输入存档名称...">
+                <button id="confirmSave" class="btn success">保存当前状态</button>
+            </div>
+            <div id="savedStatesList"></div>
+        </div>
+    </div>
+
+    <div id="contextMenu">
+        <div class="context-menu-item menu-item-1" data-action="copy" title="复制">📝</div>
+        <div class="context-menu-item menu-item-2" data-action="pan" title="平移">🖐️</div>
+        <div class="context-menu-item menu-item-3" data-action="rotate" title="旋转 (↺)">↻</div>
+        <div class="context-menu-item menu-item-4" data-action="flip-h" title="水平翻转">↔️</div>
+        <div class="context-menu-item menu-item-5" data-action="flip-v" title="垂直翻转">↕️</div>
+        <div class="context-menu-item menu-item-6" data-action="delete" title="删除选中区域">🗑️</div>
+    </div>
+
+    <script>
+let PATTERNS_DATA = {
+    '滑翔机': { pattern: [[0,1,0],[0,0,1],[1,1,1]], category: 'spaceship' },
+    '轻量级飞船': { pattern: [[1,0,0,1,0],[0,0,0,0,1],[1,0,0,0,1],[0,1,1,1,1]], category: 'spaceship' },
+    '双子飞船': { pattern: [[0,0,0,0,0,0,1,0],[0,1,0,0,0,0,0,1],[0,1,0,0,0,0,0,1],[0,1,0,1,1,1,1,1],[0,0,0,0,0,0,0,0],[0,0,1,1,0,0,0,0],[1,0,0,0,0,1,0,0],[0,0,0,0,0,0,1,0],[1,0,0,0,0,0,1,0],[0,1,1,1,1,1,1,0]], category: 'spaceship' },
+    '甲壳虫': { pattern: [[0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,0,0,1,1,0,0,0],[0,0,1,0,0,0,0,0,0,0,0,1,1,0,1,0,0,0,1,1,0,0,0],[0,1,0,0,1,0,0,0,0,0,0,1,0,0,1,1,0,0,0,0,0,0,0],[1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0],[1,0,0,1,1,0,1,1,1,0,0,0,1,0,0,0,1,1,0,1,1,0,0],[0,0,0,1,0,0,0,1,0,0,1,1,0,0,1,0,0,1,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0],[0,0,0,0,0,1,1,1,1,0,0,0,1,0,0,0,0,0,1,0,0,0,1],[0,0,0,0,0,1,1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,1,0],[0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,1,1,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,1,1,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0],[0,0,0,0,0,0,1,1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0]], category: 'spaceship' },
+    '青蛙': { pattern: [[0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,1,0,1,0,0,0,0,1,1,0],[0,0,0,0,0,1,0,0,0,1,0,0,0,1,1,1,0,0,1,0,0,0,0,1,0,0,0,0,0],[1,1,0,0,0,1,0,0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,1,1,1,0,0,1],[1,1,0,0,0,1,0,1,1,0,0,0,0,0,0,1,0,0,0,1,0,1,0,1,0,0,0,0,0],[1,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,1,1,0],[0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0],[0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1],[1,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,1,1,0],[1,1,0,0,0,1,0,1,1,0,0,0,0,0,0,1,0,0,0,1,0,1,0,1,0,0,0,0,0],[1,1,0,0,0,1,0,0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,1,1,1,0,0,1],[0,0,0,0,0,1,0,0,0,1,0,0,0,1,1,1,0,0,1,0,0,0,0,1,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,1,0,1,0,0,0,0,1,1,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]], category: 'spaceship' },
+    '飞虫': { pattern: [[0,0,0,0,1,1,1,1,1,1],[0,0,1,1,0,0,0,0,0,1],[1,1,0,1,0,0,0,0,0,1],[0,0,0,0,1,0,0,0,1,0],[0,0,0,0,0,0,1,0,0,0],[0,0,0,0,0,0,1,1,0,0],[0,0,0,0,0,1,1,1,1,0],[0,0,0,0,0,1,1,0,1,1],[0,0,0,0,0,0,0,1,1,0]], category: 'spaceship' },
+    '太空战队': { pattern: [[0,1,0,0,1,0,0,0,0,0,1,1,0,0],[1,0,0,0,0,0,0,0,0,1,1,1,1,0],[1,0,0,0,1,0,0,0,1,1,0,1,1,0],[1,1,1,1,0,0,0,0,0,1,1,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,1,1,0],[0,0,1,1,1,0,0,0,0,0,0,0,1,1],[0,0,1,0,0,0,0,0,0,1,0,0,1,0],[0,0,1,0,1,0,0,0,0,0,0,1,0,0],[0,0,0,1,1,0,0,0,1,1,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,1,0,0,1,0,0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,0,1,0,0,0,0,0,0,0,0,0],[1,1,1,1,0,0,0,0,0,0,0,0,0,0]], category: 'spaceship' },
+    '轰炸机': { pattern: [[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,1,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,0,0,1,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,0],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0],[0,0,0,0,0,0,0,0,1,1,1,1,1,0,0,0,0,1,0,0,1,0,0],[0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,1,1,0,1,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1,1,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1],[0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],[1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0],[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]], category: 'spaceship' },
+    '巨大战甲': { pattern: [[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],[0,0,0,0,0,1,1,1,1,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1,1,1,0,0,0,0,0],[0,1,1,0,1,1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,1,1,0,1,1,0],[0,1,1,0,0,1,0,0,0,0,0,1,1,1,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,1,1,1,0,0,0,0,0,1,0,0,1,1,0],[1,0,0,1,0,0,0,0,0,0,0,1,0,1,0,1,1,1,1,1,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,1,1,1,1,1,0,1,0,1,0,0,0,0,0,0,0,1,0,0,1],[0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,1,0,1,0,0,0,1,0,1,1,0,0,0,1,1,0,1,0,0,0,1,0,1,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,1,0,1,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,0,0,0,0,0,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1,1,1,0,0,0,1,1,1,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,1,0,1,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1,1,0,1,0,1,0,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,0,0,0,1,0,1,0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,1,1,0,1,1,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,0,0,1,0,1,0,0,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]], category: 'spaceship' },
+    '杠铃': { pattern: [[0,0,1,0,0,0,0,1,0,0],[1,1,0,1,1,1,1,0,1,1],[0,0,1,0,0,0,0,1,0,0]], category: 'oscillator' },
+    '双蜂穿梭': { pattern: [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0],[1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,1,1],[1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0],[1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],[1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0]], category: 'oscillator' },
+    '八字形': { pattern: [[1,1,0,0,0,0],[1,1,0,1,0,0],[0,0,0,0,1,0],[0,1,0,0,0,0],[0,0,1,0,1,1],[0,0,0,0,1,1]], category: 'oscillator' },
+    '脉冲星': { pattern: [[0,0,1,1,1,0,0,0,1,1,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,0,0,1,0,1,0,0,0,0,1],[1,0,0,0,0,1,0,1,0,0,0,0,1],[1,0,0,0,0,1,0,1,0,0,0,0,1],[0,0,1,1,1,0,0,0,1,1,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,1,1,1,0,0,0,1,1,1,0,0],[1,0,0,0,0,1,0,1,0,0,0,0,1],[1,0,0,0,0,1,0,1,0,0,0,0,1],[1,0,0,0,0,1,0,1,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,1,1,1,0,0,0,1,1,1,0,0]], category: 'oscillator' },
+    '花瓣': { pattern: [[0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],[1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1],[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0]], category: 'oscillator' },
+    '开眼': { pattern: [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,1,0,0,1,0,1,1,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[0,1,1,0,0,1,0,0,0,0,1,0,0,1,1,0,0,0,1,1,0,0,0,0,0,0,0,1,0,0,0,0,1],[0,0,1,0,0,1,0,1,1,0,1,0,0,1,0,0,0,1,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0]], category: 'oscillator' },
+    '时钟': { pattern: [[0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,1,1,0,1,1,0,1,0,0,0,0,1,1,0,0,0],[0,0,1,0,0,1,0,1,0,1,0,0,0,0,0,1,0,0,0,0],[0,0,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,0,0],[1,1,1,0,0,0,0,0,0,0,1,1,1,0,0,0,1,0,0,0],[0,0,0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,1,1,1],[0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],[0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,1,0,0],[0,0,0,0,1,0,0,0,0,0,1,0,1,0,1,0,0,1,0,0],[0,0,0,1,1,0,0,0,0,1,0,1,1,0,1,1,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0]], category: 'oscillator' },
+    '穿梭机': { pattern: [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,1,0,1,1,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,1,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,1,0,0],[0,0,1,1,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1,1,0,0],[0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0],[0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],[0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0],[0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0],[1,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1],[0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,1],[1,1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,1],[0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0],[1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1,1],[1,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0],[1,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1],[0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0],[0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0],[0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0],[0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0],[0,0,1,1,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1,1,0,0],[0,0,1,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,1,1,0,1,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]], category: 'oscillator' },
+    '包围': { pattern: [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,1,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0],[0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0],[0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1],[0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],[0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],[0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],[1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1],[0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0],[0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0],[0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,1,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]], category: 'oscillator' },
+    '银河系': { pattern: [[1,1,0,1,1,0,1,1],[1,1,0,1,1,0,1,1],[0,0,0,0,0,0,0,0],[1,1,0,1,1,0,1,1],[1,1,0,1,1,0,1,1],[0,0,0,0,0,0,0,0],[1,1,0,1,1,0,1,1],[1,1,0,1,1,0,1,1]], category: 'static' },
+    '鹿角': { pattern: [[1,1,0,0,0,0,0,1,1],[1,0,0,0,0,0,0,0,1],[0,1,1,1,0,1,1,1,0],[0,0,0,1,0,1,0,0,0],[0,0,0,0,1,0,0,0,0]], category: 'static' },
+    '双面包': { pattern: [[0,1,0,0,0,0,0],[1,0,1,0,0,0,0],[1,0,0,1,0,0,0],[0,1,1,0,1,0,0],[0,0,0,1,0,1,0],[0,0,0,1,0,0,1],[0,0,0,0,1,1,0]], category: 'static' },
+    '长船': { pattern: [[1,1,0,0,0],[1,0,1,0,0],[0,1,0,1,0],[0,0,1,0,1],[0,0,0,1,1]], category: 'static' },
+    '1103代': { pattern: [[0,1,1],[1,1,0],[0,1,0]], category: 'complex' },
+    '百代逝者': { pattern: [[0,0,0,0,0,0,1,0],[1,1,0,0,0,0,0,0],[0,1,0,0,0,1,1,1]], category: 'complex' },
+    '5260代': { pattern: [[0,1,0,0,0,0,0],[0,0,0,1,0,0,0],[1,1,0,0,1,1,1]], category: 'complex' },
+    '蝴蝶': { pattern: [[0,0,0,1,0,0,0],[0,0,1,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,1,1,0,0],[1,0,0,0,0,0,1]], category: 'complex' },
+    '炸弹': { pattern: [[1,0,0,0,1],[0,1,1,1,0],[0,1,0,1,0],[0,1,1,1,0],[1,0,0,0,1]], category: 'complex' },
+    '花朵': { pattern: [[0,0,1,0,0],[0,1,0,1,0],[1,0,1,0,1],[0,1,0,1,0],[0,0,1,0,0]], category: 'complex' },
+    '无限增长（DNA密码）': { pattern: [[1,1,1,0,1],[1,0,0,0,0],[0,0,0,1,1],[0,1,1,0,1],[1,0,1,0,1]], category: 'complex' },
+    '高斯帕枪': { pattern: [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1],[0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1],[1,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,1,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,1,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]], category: 'gun' },
+    '双枪': { pattern: [[0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0],[1,1,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0],[1,1,0,1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1],[0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1],[0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,1,1,0],[1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],[0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0],[0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,1,1,0,0,0,0,0,1,1,0,0],[0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,0,1,1,0,1],[0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],[0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0]], category: 'gun' }
+};
+
+function parseRLE(rle, w, h) {
+    const matrix = Array.from({ length: h }, () => Array(w).fill(0));
+    let x = 0, y = 0, countStr = '';
+    for (const char of rle) {
+        if (char >= '0' && char <= '9') countStr += char;
+        else {
+            const count = countStr === '' ? 1 : parseInt(countStr, 10);
+            countStr = '';
+            if (char === 'b') x += count;
+            else if (char === 'o') {
+                for (let i = 0; i < count; i++) {
+                    if (x < w && y < h) matrix[y][x] = 1;
+                    x++;
+                }
+            } else if (char === '$') { y += count; x = 0; } else if (char === '!') break;
+        }
+    }
+    return matrix;
+}
+
+function gridToRLE(grid) {
+    if (!grid || grid.length === 0) return { rle: '', width: 0, height: 0 };
+    const height = grid.length, width = grid[0].length;
+    let minRow = height, maxRow = -1, minCol = width, maxCol = -1;
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (grid[y][x]) {
+        minRow = Math.min(minRow, y); maxRow = Math.max(maxRow, y);
+        minCol = Math.min(minCol, x); maxCol = Math.max(maxCol, x);
+    }
+    if (maxRow === -1) return { rle: '', width: 0, height: 0 };
+    const actualWidth = maxCol - minCol + 1, actualHeight = maxRow - minRow + 1;
+    let rle = '';
+    for (let y = minRow; y <= maxRow; y++) {
+        let count = 0, lastState = 0;
+        for (let x = minCol; x <= maxCol; x++) {
+            const currentState = grid[y][x] ? 1 : 0;
+            if (currentState === lastState) count++;
+            else {
+                if (count > 0) rle += (count > 1 ? count : '') + (lastState === 0 ? 'b' : 'o');
+                count = 1; lastState = currentState;
+            }
+        }
+        if (count > 0) rle += (count > 1 ? count : '') + (lastState === 0 ? 'b' : 'o');
+        if (y < maxRow) rle += '$';
+    }
+    rle += '!';
+    return { rle, width: actualWidth, height: actualHeight };
+}
+
+class GameOfLife {
+    constructor(rows = 80, cols = 100) {
+        this.rows = rows;
+        this.cols = cols;
+        this.generationsPerSecond = 5;
+        this.isRunning = false;
+        this.drawMode = false;
+        this.isDrawing = false;
+        this.drawingMode = undefined;
+        this.lastDrawnCell = null;
+        this.lastDrawnInfiniteCell = null;
+        this.isSelecting = false;
+        this.isPasting = false;
+        this.isInfiniteSelecting = false;
+        this.infiniteSelectionRect = {};
+        this.generation = 0;
+        this.population = 0;
+        this.maxPopulation = 0;
+        this.maxPopulationGeneration = 0;
+        this.rules = { s: [2, 3], b: [3] };
+        this.grid = this.createEmptyGrid();
+        this.history = [];
+        this.intervalId = null;
+        this.draggedPattern = null;
+        this.previewCells = [];
+        this.currentCategory = 'all';
+        this.selectionRect = { startX: 0, startY: 0, endX: 0, endY: 0 };
+        this.clipboard = null;
+        this.mode = 'finite';
+        this.liveCells = new Set();
+        this.viewport = { scale: 15, offsetX: 0, offsetY: 0, isDragging: false, lastMousePos: { x: 0, y: 0 } };
+        this.ctx = null;
+        this.dom = {
+            gridContainer: document.getElementById('gridContainer'),
+            grid: document.getElementById('grid'),
+            infiniteCanvas: document.getElementById('infiniteCanvas'),
+            ghost: null,
+            selectionBox: null,
+            contextMenu: document.getElementById('contextMenu'),
+            generation: document.getElementById('generation'),
+            population: document.getElementById('population'),
+            maxPopulation: document.getElementById('maxPopulation'),
+            maxPopulationGeneration: document.getElementById('maxPopulationGeneration'),
+            playPauseBtn: document.getElementById('playPauseBtn'),
+            stepBtn: document.getElementById('stepBtn'),
+            undoBtn: document.getElementById('undoBtn'),
+            resetBtn: document.getElementById('resetBtn'),
+            randomBtn: document.getElementById('randomBtn'),
+            drawModeBtn: document.getElementById('drawModeBtn'),
+            exportBtn: document.getElementById('exportBtn'),
+            fullscreenBtn: document.getElementById('fullscreenBtn'),
+            saveBtn: document.getElementById('saveBtn'),
+            loadBtn: document.getElementById('loadBtn'),
+            confirmSave: document.getElementById('confirmSave'),
+            speedSlider: document.getElementById('speed'),
+            speedValue: document.getElementById('speedValue'),
+            gridSizeSelect: document.getElementById('gridSize'),
+            patternGrid: document.getElementById('patternGrid'),
+            categoryTabs: document.getElementById('categoryTabs'),
+            saveModal: document.getElementById('saveModal'),
+            saveNameInput: document.getElementById('saveName'),
+            savedStatesList: document.getElementById('savedStatesList'),
+            ruleSInput: document.getElementById('ruleS'),
+            ruleBInput: document.getElementById('ruleB'),
+            ruleSurvivalText: document.getElementById('rule-survival').querySelector('span:last-child'),
+            ruleBirthText: document.getElementById('rule-birth').querySelector('span:last-child'),
+        };
+        this.initialize();
+    }
+
+    get speed() {
+        return Math.max(10, Math.round(1000 / this.generationsPerSecond));
+    }
+
+    initialize() {
+        if (this.dom.infiniteCanvas) this.ctx = this.dom.infiniteCanvas.getContext('2d');
+        this.createGridElements();
+        this.createPatternCategories();
+        this.filterPatterns();
+        this.setupEventListeners();
+        this.loadSavedStates();
+        this.updateStats();
+        this.updateRuleDescription();
+    }
+
+    createEmptyGrid() {
+        return Array(this.rows).fill(null).map(() => Array(this.cols).fill(false));
+    }
+
+    createGridElements() {
+        const grid = this.dom.grid;
+        grid.innerHTML = '';
+        grid.style.gridTemplateColumns = `repeat(${this.cols}, 1fr)`;
+        const containerWidth = this.dom.gridContainer.clientWidth;
+        const cellSize = Math.floor(containerWidth / this.cols) - 1;
+        const finalCellSize = Math.max(2, Math.min(15, cellSize));
+        this.cellSize = { width: finalCellSize, height: finalCellSize };
+        grid.style.width = `${this.cols * (finalCellSize + 1)}px`;
+        grid.style.height = `${this.rows * (finalCellSize + 1)}px`;
+        let cellsFragment = document.createDocumentFragment();
+        for (let i = 0; i < this.rows; i++) for (let j = 0; j < this.cols; j++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            cell.dataset.row = i;
+            cell.dataset.col = j;
+            cell.style.width = `${finalCellSize}px`;
+            cell.style.height = `${finalCellSize}px`;
+            cellsFragment.appendChild(cell);
+        }
+        grid.appendChild(cellsFragment);
+    }
+
+    resizeGrid(rows, cols) {
+        this.pause();
+        this.rows = rows;
+        this.cols = cols;
+        this.grid = this.createEmptyGrid();
+        this.history = [];
+        this.generation = 0;
+        this.maxPopulation = 0;
+        this.createGridElements();
+        this.updateStats();
+        this.showToast(`網格已重設為 ${rows}×${cols}`);
+    }
+
+    switchMode(newMode, rows, cols, isBounded = false) {
+        this.pause();
+        this.hideContextMenu();
+        this.isSelecting = false;
+        this.isPasting = false;
+        this.clipboard = null;
+        this.mode = newMode;
+        if (newMode === 'infinite') {
+            this.dom.grid.classList.add('hidden');
+            this.dom.infiniteCanvas.classList.remove('hidden');
+            this.liveCells.clear();
+            const container = this.dom.gridContainer;
+            this.dom.infiniteCanvas.width = container.clientWidth;
+            this.dom.infiniteCanvas.height = container.clientHeight;
+            this.viewport.offsetX = this.dom.infiniteCanvas.width / 2;
+            this.viewport.offsetY = this.dom.infiniteCanvas.height / 2;
+            this.viewport.scale = 15;
+            this.drawInfinite();
+            this.showToast('🌌 已切换到无限宇宙模式');
+        } else {
+            this.dom.grid.classList.remove('hidden');
+            this.dom.infiniteCanvas.classList.add('hidden');
+            this.rows = rows;
+            this.cols = cols;
+            this.isBounded = isBounded;
+            this.grid = this.createEmptyGrid();
+            this.createGridElements();
+            if (this.dom.selectionBox) this.dom.selectionBox.remove(), this.dom.selectionBox = null;
+            if (this.isRunning) this.dom.grid.classList.add('running-mode'); else this.dom.grid.classList.remove('running-mode');
+            this.showToast(`${isBounded ? '有界' : '无界'} ${rows}×${cols}`);
+        }
+        this.reset(true);
+    }
+
+    countNeighbors(row, col) {
+        let count = 0;
+        for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) if (i !== 0 || j !== 0) {
+            if (this.isBounded) {
+                const r = row + i, c = col + j;
+                if (r >= 0 && r < this.rows && c >= 0 && c < this.cols && this.grid[r][c]) count++;
+            } else {
+                const r = (row + i + this.rows) % this.rows, c = (col + j + this.cols) % this.cols;
+                if (this.grid[r][c]) count++;
+            }
+        }
+        return count;
+    }
+
+    nextGeneration() {
+        if (this.mode === 'finite') this.nextGenerationFinite();
+        else this.nextGenerationInfinite();
+    }
+
+    nextGenerationFinite() {
+        this.saveToHistory();
+        const nextGrid = this.createEmptyGrid();
+        let changedCells = [];
+        for (let i = 0; i < this.rows; i++) for (let j = 0; j < this.cols; j++) {
+            const neighbors = this.countNeighbors(i, j);
+            const isAlive = this.grid[i][j];
+            nextGrid[i][j] = isAlive ? this.rules.s.includes(neighbors) : this.rules.b.includes(neighbors);
+            if (nextGrid[i][j] !== isAlive) changedCells.push({ r: i, c: j });
+        }
+        this.grid = nextGrid;
+        this.generation++;
+        this.updateChangedCellsDisplay(changedCells);
+        this.updateStats();
+    }
+
+    nextGenerationInfinite() {
+        const nextLiveCells = new Set(), cellsToCheck = new Set();
+        for (const cell of this.liveCells) {
+            const [x, y] = cell.split(',').map(Number);
+            for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) cellsToCheck.add(`${x + i},${y + j}`);
+        }
+        for (const cell of cellsToCheck) {
+            const neighbors = this.countNeighborsInfinite(cell);
+            const isAlive = this.liveCells.has(cell);
+            if (isAlive && this.rules.s.includes(neighbors) || !isAlive && this.rules.b.includes(neighbors)) nextLiveCells.add(cell);
+        }
+        this.liveCells = nextLiveCells;
+        this.generation++;
+        this.drawInfinite();
+        this.updateStats();
+    }
+
+    countNeighborsInfinite(cellKey) {
+        const [x, y] = cellKey.split(',').map(Number);
+        let count = 0;
+        for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) if (i !== 0 || j !== 0) if (this.liveCells.has(`${x + i},${y + j}`)) count++;
+        return count;
+    }
+
+    updateCellDisplay(r, c) {
+        const cell = this.dom.grid.children[r * this.cols + c];
+        if (cell) cell.classList.toggle('alive', this.grid[r][c]);
+    }
+
+    drawInfinite() {
+        const { infiniteCanvas, gridContainer } = this.dom;
+        if (!infiniteCanvas || !this.ctx) return;
+        if (infiniteCanvas.width !== gridContainer.clientWidth || infiniteCanvas.height !== gridContainer.clientHeight) {
+            infiniteCanvas.width = gridContainer.clientWidth;
+            infiniteCanvas.height = gridContainer.clientHeight;
+        }
+        this.ctx.clearRect(0, 0, infiniteCanvas.width, infiniteCanvas.height);
+        this.ctx.save();
+        this.ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
+        this.ctx.scale(this.viewport.scale, this.viewport.scale);
+        const visibleBounds = {
+            left: -this.viewport.offsetX / this.viewport.scale,
+            right: (infiniteCanvas.width - this.viewport.offsetX) / this.viewport.scale,
+            top: -this.viewport.offsetY / this.viewport.scale,
+            bottom: (infiniteCanvas.height - this.viewport.offsetY) / this.viewport.scale
+        };
+        this.ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        this.ctx.lineWidth = 1 / this.viewport.scale;
+        if (this.viewport.scale > 8) {
+            this.ctx.beginPath();
+            for (let x = Math.floor(visibleBounds.left); x <= Math.ceil(visibleBounds.right); x++) {
+                this.ctx.moveTo(x, visibleBounds.top);
+                this.ctx.lineTo(x, visibleBounds.bottom);
+            }
+            for (let y = Math.floor(visibleBounds.top); y <= Math.ceil(visibleBounds.bottom); y++) {
+                this.ctx.moveTo(visibleBounds.left, y);
+                this.ctx.lineTo(visibleBounds.right, y);
+            }
+            this.ctx.stroke();
+        }
+        this.ctx.fillStyle = '#e74c3c';
+        for (const cell of this.liveCells) {
+            const [x, y] = cell.split(',').map(Number);
+            if (x >= visibleBounds.left - 1 && x <= visibleBounds.right + 1 && y >= visibleBounds.top - 1 && y <= visibleBounds.bottom + 1) this.ctx.fillRect(x, y, 0.9, 0.9);
+        }
+        if (this.infinitePreview) {
+            this.ctx.fillStyle = 'rgba(231,76,60,0.5)';
+            const { pattern, startX, startY } = this.infinitePreview;
+            for (let i = 0; i < pattern.length; i++) for (let j = 0; j < pattern[i].length; j++) if (pattern[i][j]) {
+                const x = startX + j, y = startY + i;
+                if (x >= visibleBounds.left - 1 && x <= visibleBounds.right + 1 && y >= visibleBounds.top - 1 && y <= visibleBounds.bottom + 1) this.ctx.fillRect(x, y, 0.9, 0.9);
+            }
+        }
+        if (this.infiniteSelectionRect && typeof this.infiniteSelectionRect.startX === 'number') {
+            const { startX, startY, endX, endY } = this.infiniteSelectionRect;
+            const x1 = Math.min(startX, endX), y1 = Math.min(startY, endY), x2 = Math.max(startX, endX), y2 = Math.max(startY, endY);
+            this.ctx.strokeStyle = '#3498db';
+            this.ctx.lineWidth = 2 / this.viewport.scale;
+            this.ctx.setLineDash([5 / this.viewport.scale, 5 / this.viewport.scale]);
+            this.ctx.strokeRect(x1, y1, x2 - x1 + 1, y2 - y1 + 1);
+            this.ctx.fillStyle = 'rgba(52,152,219,0.1)';
+            this.ctx.fillRect(x1, y1, x2 - x1 + 1, y2 - y1 + 1);
+            this.ctx.setLineDash([]);
+        }
+        this.ctx.restore();
+    }
+
+    screenToWorld(x, y) {
+        const rect = this.dom.infiniteCanvas.getBoundingClientRect();
+        const canvasX = x - rect.left, canvasY = y - rect.top;
+        return { x: (canvasX - this.viewport.offsetX) / this.viewport.scale, y: (canvasY - this.viewport.offsetY) / this.viewport.scale };
+    }
+
+    handleInfiniteMouseDown(e) {
+        this.hideContextMenu();
+        this.clearInfiniteSelection();
+        if (this.isPasting) return this.pasteFromInfiniteClipboard(e);
+        this.viewport.mouseDownPos = { x: e.clientX, y: e.clientY };
+        this.viewport.hasMoved = false;
+        if (e.button === 0) {
+            if (this.drawMode) {
+                this.isDrawing = true;
+                const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+                const cellX = Math.floor(x), cellY = Math.floor(y), cellKey = `${cellX},${cellY}`;
+                this.drawingMode = !this.liveCells.has(cellKey);
+                this.lastDrawnInfiniteCell = { x: cellX, y: cellY };
+                if (this.drawingMode) this.liveCells.add(cellKey); else this.liveCells.delete(cellKey);
+                this.drawInfinite();
+                this.updateStats();
+            } else {
+                this.viewport.isDragging = true;
+                this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+                this.dom.infiniteCanvas.style.cursor = 'grabbing';
+            }
+        } else if (e.button === 2) {
+            if (this.drawMode) {
+                this.isInfiniteSelecting = true;
+                this.startInfiniteSelection(e);
+            } else {
+                this.viewport.isDragging = true;
+                this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+                this.dom.infiniteCanvas.style.cursor = 'grabbing';
+            }
+            e.preventDefault();
+        }
+    }
+
+    handleInfiniteMouseMove(e) {
+        if (this.isPasting) {
+            this.showInfinitePreview(e, this.clipboard);
+            return;
+        }
+        if (this.drawMode && this.isDrawing) {
+            const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+            const cellX = Math.floor(x), cellY = Math.floor(y), cellKey = `${cellX},${cellY}`;
+            if (this.lastDrawnInfiniteCell && this.lastDrawnInfiniteCell.x === cellX && this.lastDrawnInfiniteCell.y === cellY) return;
+            if (this.drawingMode) this.liveCells.add(cellKey); else this.liveCells.delete(cellKey);
+            this.lastDrawnInfiniteCell = { x: cellX, y: cellY };
+            this.drawInfinite();
+            this.updateStats();
+            return;
+        }
+        if (this.isInfiniteSelecting) return this.updateInfiniteSelection(e);
+        if (!this.viewport.isDragging) return;
+        if (!this.viewport.hasMoved && this.viewport.mouseDownPos) {
+            const moveDistance = Math.sqrt(Math.pow(e.clientX - this.viewport.mouseDownPos.x, 2) + Math.pow(e.clientY - this.viewport.mouseDownPos.y, 2));
+            if (moveDistance > 5) this.viewport.hasMoved = true;
+        }
+        if (this.viewport.hasMoved) {
+            const dx = e.clientX - this.viewport.lastMousePos.x, dy = e.clientY - this.viewport.lastMousePos.y;
+            this.viewport.offsetX += dx;
+            this.viewport.offsetY += dy;
+            this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+            this.drawInfinite();
+        }
+    }
+
+    handleInfiniteMouseUp(e) {
+        if (e.button === 0) {
+            if (this.drawMode) {
+                this.isDrawing = false;
+                this.drawingMode = undefined;
+                this.lastDrawnInfiniteCell = null;
+            } else {
+                if (!this.viewport.hasMoved) {
+                    const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+                    const cellX = Math.floor(x), cellY = Math.floor(y), cellKey = `${cellX},${cellY}`;
+                    if (this.liveCells.has(cellKey)) this.liveCells.delete(cellKey); else this.liveCells.add(cellKey);
+                    this.drawInfinite();
+                    this.updateStats();
+                }
+                this.viewport.isDragging = false;
+                this.dom.infiniteCanvas.style.cursor = 'grab';
+            }
+            this.viewport.hasMoved = false;
+            this.viewport.mouseDownPos = null;
+        } else if (e.button === 2) {
+            if (this.isInfiniteSelecting) {
+                this.isInfiniteSelecting = false;
+                this.endInfiniteSelection(e);
+            } else {
+                this.viewport.isDragging = false;
+                this.viewport.hasMoved = false;
+                this.viewport.mouseDownPos = null;
+                this.dom.infiniteCanvas.style.cursor = 'grab';
+            }
+        }
+    }
+
+    handleInfiniteWheel(e) {
+        e.preventDefault();
+        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+        const rect = this.dom.infiniteCanvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+        const worldPosBeforeZoom = this.screenToWorld(e.clientX, e.clientY);
+        this.viewport.scale *= zoomFactor;
+        this.viewport.scale = Math.max(1, Math.min(50, this.viewport.scale));
+        const worldPosAfterZoom = this.screenToWorld(e.clientX, e.clientY);
+        this.viewport.offsetX += (worldPosAfterZoom.x - worldPosBeforeZoom.x) * this.viewport.scale;
+        this.viewport.offsetY += (worldPosAfterZoom.y - worldPosBeforeZoom.y) * this.viewport.scale;
+        this.drawInfinite();
+    }
+
+    showInfinitePreview(e, pattern) {
+        this.clearInfinitePreview();
+        const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+        const centerX = Math.floor(x), centerY = Math.floor(y);
+        const startX = centerX - Math.floor((pattern[0]?.length || 0) / 2);
+        const startY = centerY - Math.floor(pattern.length / 2);
+        this.infinitePreview = { pattern, startX, startY };
+        this.drawInfinite();
+    }
+
+    clearInfinitePreview() {
+        this.infinitePreview = null;
+        this.drawInfinite();
+    }
+
+    startInfiniteSelection(e) {
+        const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+        const startX = Math.floor(x), startY = Math.floor(y);
+        this.infiniteSelectionRect = { startX, startY, endX: startX, endY: startY };
+        this.drawInfinite();
+    }
+
+    updateInfiniteSelection(e) {
+        const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+        this.infiniteSelectionRect.endX = Math.floor(x);
+        this.infiniteSelectionRect.endY = Math.floor(y);
+        this.drawInfinite();
+    }
+
+    endInfiniteSelection(e) {
+        const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+        const endX = Math.floor(x), endY = Math.floor(y);
+        const { startX, startY } = this.infiniteSelectionRect;
+        if (startX === endX && startY === endY) return this.clearInfiniteSelection();
+        const x1 = Math.min(startX, endX), y1 = Math.min(startY, endY), x2 = Math.max(startX, endX), y2 = Math.max(startY, endY);
+        this.infiniteSelectionRect = { startX: x1, startY: y1, endX: x2, endY: y2 };
+        this.showContextMenu(e.clientX, e.clientY);
+    }
+
+    clearInfiniteSelection() {
+        this.infiniteSelectionRect = {};
+        this.drawInfinite();
+    }
+
+    extractPatternFromInfiniteSelection() {
+        const { startX, startY, endX, endY } = this.infiniteSelectionRect;
+        if (typeof startX !== 'number' || typeof startY !== 'number' || typeof endX !== 'number' || typeof endY !== 'number') return null;
+        const width = endX - startX + 1, height = endY - startY + 1;
+        if (width <= 0 || height <= 0) return null;
+        const pattern = Array(height).fill(null).map(() => Array(width).fill(false));
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+            const cellX = startX + x, cellY = startY + y, cellKey = `${cellX},${cellY}`;
+            pattern[y][x] = this.liveCells.has(cellKey);
+        }
+        return pattern;
+    }
+
+    clearInfiniteArea(rect) {
+        const { startX, startY, endX, endY } = rect;
+        for (let y = startY; y <= endY; y++) for (let x = startX; x <= endX; x++) this.liveCells.delete(`${x},${y}`);
+        this.drawInfinite();
+        this.updateStats();
+    }
+
+    pasteInfinitePattern(pattern, startX, startY) {
+        if (!pattern) return;
+        const height = pattern.length, width = pattern[0].length;
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (pattern[y][x]) this.liveCells.add(`${startX + x},${startY + y}`);
+        this.drawInfinite();
+        this.updateStats();
+    }
+
+    pasteFromInfiniteClipboard(e) {
+        if (!this.clipboard) return;
+        const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+        const pattern = this.clipboard;
+        const startX = Math.floor(x) - Math.floor(pattern[0].length / 2), startY = Math.floor(y) - Math.floor(pattern.length / 2);
+        this.pasteInfinitePattern(pattern, startX, startY);
+        this.cancelInfinitePasting();
+        this.showToast('貼上成功！');
+    }
+
+    cancelInfinitePasting() {
+        this.isPasting = false;
+        this.dom.infiniteCanvas.classList.remove('pasting-mode');
+        this.clearInfinitePreview();
+    }
+
+    placePatternInfinite(e, pattern) {
+        const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+        const centerX = Math.floor(x), centerY = Math.floor(y);
+        const startX = centerX - Math.floor((pattern[0]?.length || 0) / 2), startY = centerY - Math.floor(pattern.length / 2);
+        for (let i = 0; i < pattern.length; i++) for (let j = 0; j < pattern[i].length; j++) if (pattern[i][j]) this.liveCells.add(`${startX + j},${startY + i}`);
+        this.clearInfinitePreview();
+        this.drawInfinite();
+        this.updateStats();
+    }
+
+    updateChangedCellsDisplay(changedCells) {
+        for (const { r, c } of changedCells) this.updateCellDisplay(r, c);
+    }
+
+    updateFullGridDisplay() {
+        for (let i = 0; i < this.rows; i++) for (let j = 0; j < this.cols; j++) this.updateCellDisplay(i, j);
+    }
+
+    updateStats() {
+        this.population = this.mode === 'infinite' ? this.liveCells.size : this.grid.flat().filter(Boolean).length;
+        if (this.population > this.maxPopulation) {
+            this.maxPopulation = this.population;
+            this.maxPopulationGeneration = this.generation;
+        }
+        this.dom.generation.textContent = this.generation;
+        this.dom.population.textContent = this.population;
+        this.dom.maxPopulation.textContent = this.maxPopulation;
+        this.dom.maxPopulationGeneration.textContent = this.maxPopulationGeneration;
+    }
+
+    togglePlayPause() {
+        this.isRunning ? this.pause() : this.start();
+    }
+
+    start() {
+        if (this.isRunning) return;
+        this.isRunning = true;
+        this.intervalId = setInterval(() => this.nextGeneration(), this.speed);
+        this.dom.playPauseBtn.textContent = '⏸️ 暫停';
+        this.dom.playPauseBtn.className = 'btn warning';
+        if (this.mode !== 'infinite') this.dom.grid.classList.add('running-mode');
+    }
+
+    pause() {
+        if (!this.isRunning) return;
+        this.isRunning = false;
+        clearInterval(this.intervalId);
+        this.dom.playPauseBtn.textContent = '▶️ 開始';
+        this.dom.playPauseBtn.className = 'btn success';
+        if (this.mode !== 'infinite') this.dom.grid.classList.remove('running-mode');
+    }
+
+    step() {
+        if (!this.isRunning) this.nextGeneration();
+    }
+
+    reset() {
+        this.pause();
+        if (this.mode === 'infinite') {
+            this.liveCells.clear();
+            this.drawInfinite();
+        } else {
+            this.grid = this.createEmptyGrid();
+            this.updateFullGridDisplay();
+        }
+        this.history = [];
+        this.generation = 0;
+        this.maxPopulation = 0;
+        this.maxPopulationGeneration = 0;
+        this.updateStats();
+        this.showToast('遊戲已重置');
+    }
+
+    randomize() {
+        if (this.isRunning) return;
+        this.saveToHistory();
+        if (this.mode === 'infinite') {
+            this.liveCells.clear();
+            const centerX = Math.floor(-this.viewport.offsetX / this.viewport.scale), centerY = Math.floor(-this.viewport.offsetY / this.viewport.scale);
+            for (let x = centerX - 20; x < centerX + 20; x++) for (let y = centerY - 20; y < centerY + 20; y++) if (Math.random() < 0.3) this.liveCells.add(`${x},${y}`);
+            this.drawInfinite();
+        } else {
+            this.grid = this.grid.map(row => row.map(() => Math.random() < 0.3));
+            this.updateFullGridDisplay();
+        }
+        this.updateStats();
+        this.showToast('已生成随机图案');
+    }
+
+    saveToHistory() {
+        if (this.history.length > 50) this.history.shift();
+        this.history.push(this.grid.map(row => [...row]));
+    }
+
+    undo() {
+        if (this.isRunning || this.history.length === 0) return;
+        this.grid = this.history.pop();
+        if (this.generation > 0) this.generation--;
+        this.updateFullGridDisplay();
+        this.updateStats();
+        this.showToast('已回撤一步');
+    }
+
+    updateRules() {
+        const sValue = this.dom.ruleSInput.value.replace(/[^0-8]/g, '');
+        const bValue = this.dom.ruleBInput.value.replace(/[^0-8]/g, '');
+        this.dom.ruleSInput.value = sValue;
+        this.dom.ruleBInput.value = bValue;
+        this.rules.s = sValue.split('').map(Number);
+        this.rules.b = bValue.split('').map(Number);
+        this.updateRuleDescription();
+    }
+
+    updateRuleDescription() {
+        const sText = this.rules.s.length > 0 ? this.rules.s.join(' 或 ') : '无';
+        const bText = this.rules.b.length > 0 ? this.rules.b.join(' 或 ') : '无';
+        this.dom.ruleSurvivalText.innerHTML = `<b>存活 (S):</b> 活细胞邻居为 ${sText} 个则存活。`;
+        this.dom.ruleBirthText.innerHTML = `<b>诞生 (B):</b> 死细胞邻居为 ${bText} 个则复活。`;
+    }
+
+    setupEventListeners() {
+        this.dom.grid.addEventListener('contextmenu', e => e.preventDefault());
+        document.addEventListener('mousedown', e => this.handleMouseDown(e));
+        document.addEventListener('mousemove', e => this.handleMouseMove(e));
+        document.addEventListener('mouseup', e => this.handleMouseUp(e));
+        this.dom.grid.addEventListener('click', e => this.handleGridClick(e));
+        document.addEventListener('dragover', e => this.handleDocumentDragOver(e));
+        this.dom.grid.addEventListener('dragleave', () => this.clearPreview());
+        this.dom.grid.addEventListener('drop', e => this.handlePatternDrop(e));
+        this.dom.patternGrid.addEventListener('dragstart', e => this.handlePatternDragStart(e));
+        this.dom.patternGrid.addEventListener('click', e => this.handlePatternActionsClick(e));
+        this.dom.patternGrid.addEventListener('dblclick', e => this.handlePatternDoubleClick(e));
+        document.addEventListener('dragend', () => this.handlePatternDragEnd());
+        this.dom.playPauseBtn.addEventListener('click', () => this.togglePlayPause());
+        this.dom.stepBtn.addEventListener('click', () => this.step());
+        this.dom.undoBtn.addEventListener('click', () => this.undo());
+        this.dom.resetBtn.addEventListener('click', () => this.reset());
+        this.dom.randomBtn.addEventListener('click', () => this.randomize());
+        this.dom.drawModeBtn.addEventListener('click', () => this.toggleDrawMode());
+        this.dom.exportBtn.addEventListener('click', () => this.exportImage());
+        this.dom.fullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
+        this.dom.speedSlider.addEventListener('input', e => {
+            this.generationsPerSecond = parseInt(e.target.value, 10);
+            this.dom.speedValue.textContent = `${this.generationsPerSecond} 世代/秒`;
+            if (this.isRunning) { this.pause(); this.start(); }
+        });
+        this.dom.gridSizeSelect.addEventListener('change', e => {
+            const parts = e.target.value.split(',');
+            if (parts[0] === 'infinite') return this.switchMode('infinite');
+            const [rows, cols, isBounded] = parts;
+            this.switchMode('finite', parseInt(rows, 10), parseInt(cols, 10), isBounded === 'true');
+        });
+        this.dom.categoryTabs.addEventListener('click', e => {
+            if (e.target.matches('.category-tab')) this.filterPatterns(e.target.dataset.category);
+        });
+        document.addEventListener('keydown', e => this.handleKeyDown(e));
+        this.dom.saveModal.querySelector('.close').addEventListener('click', () => this.toggleModal(false));
+        this.dom.saveBtn.addEventListener('click', () => this.toggleModal(true));
+        this.dom.loadBtn.addEventListener('click', () => this.toggleModal(true));
+        this.dom.confirmSave.addEventListener('click', () => this.saveState());
+        this.dom.savedStatesList.addEventListener('click', e => this.handleSavedStateClick(e));
+        this.dom.contextMenu.addEventListener('click', e => this.handleContextMenuClick(e));
+        this.dom.ruleSInput.addEventListener('input', () => this.updateRules());
+        this.dom.ruleBInput.addEventListener('input', () => this.updateRules());
+        window.addEventListener('resize', () => this.resizeGrid(this.rows, this.cols));
+        if (this.dom.infiniteCanvas) {
+            this.dom.infiniteCanvas.addEventListener('mousedown', e => this.handleInfiniteMouseDown(e));
+            this.dom.infiniteCanvas.addEventListener('mousemove', e => this.handleInfiniteMouseMove(e));
+            this.dom.infiniteCanvas.addEventListener('mouseup', e => this.handleInfiniteMouseUp(e));
+            this.dom.infiniteCanvas.addEventListener('wheel', e => this.handleInfiniteWheel(e));
+            this.dom.infiniteCanvas.addEventListener('dragover', e => this.handleDocumentDragOver(e));
+            this.dom.infiniteCanvas.addEventListener('dragleave', () => this.clearInfinitePreview());
+            this.dom.infiniteCanvas.addEventListener('drop', e => this.handlePatternDrop(e));
+            this.dom.infiniteCanvas.addEventListener('contextmenu', e => e.preventDefault());
+        }
+    }
+
+    getCellFromEvent(e) {
+        const rect = this.dom.grid.getBoundingClientRect();
+        const x = e.clientX - rect.left, y = e.clientY - rect.top;
+        const col = Math.floor(x / (rect.width / this.cols)), row = Math.floor(y / (rect.height / this.rows));
+        if (row >= 0 && row < this.rows && col >= 0 && col < this.cols) return { row, col };
+        return null;
+    }
+
+    handleMouseDown(e) {
+        if (e.target.closest('#contextMenu')) return;
+        const isGridTarget = e.target.closest('.grid');
+        if (!isGridTarget) {
+            this.hideContextMenu();
+            this.clearSelection();
+            if (this.isPasting) this.cancelPasting();
+            return;
+        }
+        if (this.isPasting) return this.pasteFromClipboard(e);
+        this.hideContextMenu();
+        this.clearSelection();
+        if (e.button === 0) {
+            if (this.drawMode) this.isDrawing = true, this.handleGridDraw(e);
+        } else if (e.button === 2) {
+            if (this.drawMode) this.isSelecting = true, this.startSelection(e);
+        }
+    }
+
+    handleMouseMove(e) {
+        if (this.isPasting) {
+            this.updateGhostPosition(e);
+            this.showPreview(e, this.clipboard);
+            return;
+        }
+        if (this.isDrawing) this.handleGridDraw(e);
+        if (this.isSelecting) this.updateSelection(e);
+    }
+
+    handleMouseUp(e) {
+        if (this.isDrawing) {
+            this.saveToHistory();
+            this.isDrawing = false;
+            this.drawingMode = undefined;
+            this.lastDrawnCell = null;
+        }
+        if (this.isSelecting) this.isSelecting = false, this.endSelection(e);
+    }
+
+    handleGridClick(e) {
+        if (this.isRunning || this.drawMode || e.button !== 0 || this.isPasting) return;
+        const cellPos = this.getCellFromEvent(e);
+        if (cellPos) {
+            this.saveToHistory();
+            const { row, col } = cellPos;
+            this.grid[row][col] = !this.grid[row][col];
+            this.updateCellDisplay(row, col);
+            this.updateStats();
+        }
+    }
+
+    handleGridDraw(e) {
+        if (this.isRunning) return;
+        const cellPos = this.getCellFromEvent(e);
+        if (cellPos) {
+            const { row, col } = cellPos;
+            if (this.drawingMode === undefined) this.drawingMode = !this.grid[row][col], this.lastDrawnCell = { row, col };
+            if (this.lastDrawnCell && this.lastDrawnCell.row === row && this.lastDrawnCell.col === col) return;
+            if (this.grid[row][col] !== this.drawingMode) {
+                this.grid[row][col] = this.drawingMode;
+                this.updateCellDisplay(row, col);
+                this.updateStats();
+            }
+            this.lastDrawnCell = { row, col };
+        }
+    }
+
+    handleKeyDown(e) {
+        if (document.activeElement.tagName === 'INPUT') return;
+        const keyMap = {
+            ' ': () => this.togglePlayPause(),
+            'ArrowRight': () => this.step(),
+            'ArrowLeft': () => this.undo(),
+            'c': () => this.reset(),
+            'r': () => this.randomize(),
+            'ArrowUp': () => {
+                this.dom.speedSlider.value = Math.min(100, parseInt(this.dom.speedSlider.value, 10) + 5);
+                this.dom.speedSlider.dispatchEvent(new Event('input'));
+            },
+            'ArrowDown': () => {
+                this.dom.speedSlider.value = Math.max(1, parseInt(this.dom.speedSlider.value, 10) - 5);
+                this.dom.speedSlider.dispatchEvent(new Event('input'));
+            }
+        };
+        if (keyMap[e.key]) { e.preventDefault(); keyMap[e.key](); }
+    }
+
+    toggleDrawMode() {
+        this.drawMode = !this.drawMode;
+        this.dom.drawModeBtn.classList.toggle('warning', this.drawMode);
+        const target = this.mode === 'finite' ? this.dom.grid : this.dom.infiniteCanvas;
+        target.classList.toggle('drawing-mode', this.drawMode);
+        this.showToast(this.drawMode ? '绘图模式开启 - 按住左键拖拽可批量切换细胞状态' : '已退出绘图模式');
+    }
+
+    startSelection(e) {
+        const startPos = this.getCellFromEvent(e);
+        if (!startPos) return;
+        this.selectionRect.startX = this.selectionRect.endX = startPos.col;
+        this.selectionRect.startY = this.selectionRect.endY = startPos.row;
+        if (!this.dom.selectionBox) {
+            this.dom.selectionBox = document.createElement('div');
+            this.dom.selectionBox.className = 'selection-box';
+            this.dom.grid.appendChild(this.dom.selectionBox);
+        }
+        this.dom.selectionBox.style.display = 'block';
+        this.updateSelectionBox();
+    }
+
+    updateSelection(e) {
+        const currentPos = this.getCellFromEvent(e);
+        if (!currentPos) return;
+        this.selectionRect.endX = currentPos.col;
+        this.selectionRect.endY = currentPos.row;
+        this.updateSelectionBox();
+    }
+
+    updateSelectionBox() {
+        const { startX, startY, endX, endY } = this.selectionRect;
+        const x1 = Math.min(startX, endX), y1 = Math.min(startY, endY), x2 = Math.max(startX, endX), y2 = Math.max(startY, endY);
+        this.dom.selectionBox.style.left = `${x1 * (this.cellSize.width + 1)}px`;
+        this.dom.selectionBox.style.top = `${y1 * (this.cellSize.height + 1)}px`;
+        this.dom.selectionBox.style.width = `${(x2 - x1 + 1) * (this.cellSize.width + 1)}px`;
+        this.dom.selectionBox.style.height = `${(y2 - y1 + 1) * (this.cellSize.height + 1)}px`;
+        let innerHTML = '';
+        for (let r = y1; r <= y2; r++) for (let c = x1; c <= x2; c++) if (this.grid[r][c]) {
+            const top = (r - y1) * (this.cellSize.height + 1), left = (c - x1) * (this.cellSize.width + 1);
+            innerHTML += `<div class="highlight-cell" style="top: ${top}px; left: ${left}px; width: ${this.cellSize.width}px; height: ${this.cellSize.height}px;"></div>`;
+        }
+        this.dom.selectionBox.innerHTML = innerHTML;
+    }
+
+    endSelection(e) {
+        const endPos = this.getCellFromEvent(e);
+        if (!endPos) return this.clearSelection();
+        const { startX, startY } = this.selectionRect;
+        if (startX === endPos.col && startY === endPos.row) return this.clearSelection();
+        const x1 = Math.min(startX, endPos.col), y1 = Math.min(startY, endPos.row), x2 = Math.max(startX, endPos.col), y2 = Math.max(startY, endPos.row);
+        this.selectionRect = { startX: x1, startY: y1, endX: x2, endY: y2 };
+        this.showContextMenu(e.clientX, e.clientY);
+    }
+
+    clearSelection() {
+        if (this.dom.selectionBox) {
+            this.dom.selectionBox.style.display = 'none';
+            this.dom.selectionBox.innerHTML = '';
+        }
+        this.selectionRect = {};
+    }
+
+    showContextMenu(x, y) {
+        this.dom.contextMenu.style.left = `${x}px`;
+        this.dom.contextMenu.style.top = `${y}px`;
+        this.dom.contextMenu.classList.add('show');
+    }
+
+    hideContextMenu() {
+        this.dom.contextMenu.classList.remove('show');
+    }
+
+    handleContextMenuClick(e) {
+        const action = e.target.closest('[data-action]')?.dataset.action;
+        if (!action) return;
+        this.hideContextMenu();
+        const isInfiniteMode = this.mode === 'infinite';
+        const pattern = isInfiniteMode ? this.extractPatternFromInfiniteSelection() : this.extractPatternFromSelection();
+        if (!pattern || pattern.length === 0) {
+            if (isInfiniteMode) this.clearInfiniteSelection(); else this.clearSelection();
+            return;
+        }
+        switch (action) {
+            case 'copy':
+            case 'pan':
+                this.clipboard = pattern;
+                if (action === 'pan') {
+                    if (isInfiniteMode) this.clearInfiniteArea(this.infiniteSelectionRect); else this.clearArea(this.selectionRect);
+                }
+                this.isPasting = true;
+                if (isInfiniteMode) this.dom.infiniteCanvas.classList.add('pasting-mode'); else {
+                    this.dom.grid.classList.add('pasting-mode');
+                    this.createGhostElement(pattern, true);
+                }
+                this.showToast(action === 'copy' ? '已複製！左鍵點擊貼上' : '已平移！左鍵點擊貼上');
+                break;
+            case 'rotate':
+            case 'flip-h':
+            case 'flip-v':
+                if (isInfiniteMode) {
+                    this.clearInfiniteArea(this.infiniteSelectionRect);
+                    const transformed = this.transformPattern(pattern, action);
+                    this.pasteInfinitePattern(transformed, this.infiniteSelectionRect.startX, this.infiniteSelectionRect.startY);
+                } else {
+                    this.clearArea(this.selectionRect);
+                    const transformed = this.transformPattern(pattern, action);
+                    this.pastePattern(transformed, this.selectionRect.startY, this.selectionRect.startX);
+                }
+                break;
+            case 'delete':
+                if (isInfiniteMode) this.clearInfiniteArea(this.infiniteSelectionRect); else this.clearArea(this.selectionRect);
+                this.showToast('已删除选中区域的细胞');
+                break;
+        }
+        if (isInfiniteMode) this.clearInfiniteSelection(); else this.clearSelection();
+    }
+
+    extractPatternFromSelection() {
+        const { startX, startY, endX, endY } = this.selectionRect;
+        if (typeof startX !== 'number' || typeof startY !== 'number' || typeof endX !== 'number' || typeof endY !== 'number') return null;
+        const height = endY - startY + 1, width = endX - startX + 1;
+        if (height <= 0 || width <= 0) return null;
+        const pattern = Array(height).fill(null).map(() => Array(width).fill(false));
+        for (let i = 0; i < height; i++) for (let j = 0; j < width; j++) pattern[i][j] = this.grid[startY + i][startX + j] || false;
+        return pattern;
+    }
+
+    clearArea(rect) {
+        this.saveToHistory();
+        const { startX, startY, endX, endY } = rect;
+        for (let r = startY; r <= endY; r++) for (let c = startX; c <= endX; c++) if (this.grid[r][c]) {
+            this.grid[r][c] = false;
+            this.updateCellDisplay(r, c);
+        }
+        this.updateStats();
+    }
+
+    pastePattern(pattern, startRow, startCol) {
+        if (!pattern) return;
+        this.saveToHistory();
+        const pHeight = pattern.length, pWidth = pattern[0].length;
+        for (let i = 0; i < pHeight; i++) for (let j = 0; j < pWidth; j++) {
+            const r = startRow + i, c = startCol + j;
+            if (r >= 0 && r < this.rows && c >= 0 && c < this.cols && this.grid[r][c] !== pattern[i][j]) {
+                this.grid[r][c] = pattern[i][j];
+                this.updateCellDisplay(r, c);
+            }
+        }
+        this.updateStats();
+    }
+
+    pasteFromClipboard(e) {
+        const cellPos = this.getCellFromEvent(e);
+        if (!cellPos || !this.clipboard) return;
+        const p = this.clipboard, pHeight = p.length, pWidth = p[0].length;
+        const startRow = cellPos.row - Math.floor(pHeight / 2), startCol = cellPos.col - Math.floor(pWidth / 2);
+        this.pastePattern(p, startRow, startCol);
+        this.cancelPasting();
+        this.showToast('貼上成功！');
+    }
+
+    cancelPasting() {
+        this.isPasting = false;
+        this.clipboard = null;
+        this.dom.grid.classList.remove('pasting-mode');
+        this.removeGhostElement();
+        this.clearPreview();
+    }
+
+    handlePatternDoubleClick(e) {
+        const patternCard = e.target.closest('.pattern-card');
+        if (!patternCard) return;
+        if (this.isPasting) this.cancelPasting();
+        const patternName = patternCard.dataset.patternName;
+        const pattern = PATTERNS_DATA[patternName].pattern;
+        this.clipboard = pattern;
+        this.isPasting = true;
+        if (this.mode === 'infinite') this.dom.infiniteCanvas.classList.add('pasting-mode'); else {
+            this.dom.grid.classList.add('pasting-mode');
+            this.createGhostElement(pattern, true);
+        }
+        this.showToast(`📋 ${patternName} 已准备粘贴！左键点击放置位置`);
+    }
+
+    handlePatternDragStart(e) {
+        const patternCard = e.target.closest('.pattern-card');
+        if (!patternCard) return;
+        const patternName = patternCard.dataset.patternName;
+        this.draggedPattern = PATTERNS_DATA[patternName].pattern;
+        patternCard.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'copy';
+        this.createGhostElement(this.draggedPattern);
+        const empty = document.createElement('canvas');
+        e.dataTransfer.setDragImage(empty, 0, 0);
+    }
+
+    handleDocumentDragOver(e) {
+        e.preventDefault();
+        this.updateGhostPosition(e);
+        if (this.draggedPattern) {
+            if (e.target.closest('.grid')) this.showPreview(e, this.draggedPattern);
+            else if (e.target.closest('#infiniteCanvas')) this.showInfinitePreview(e, this.draggedPattern);
+            else this.clearPreview(), this.clearInfinitePreview();
+        }
+    }
+
+    handlePatternDragEnd() {
+        document.querySelectorAll('.pattern-card.dragging').forEach(el => el.classList.remove('dragging'));
+        this.draggedPattern = null;
+        this.clearPreview();
+        this.clearInfinitePreview();
+        this.removeGhostElement();
+    }
+
+    handlePatternDrop(e) {
+        e.preventDefault();
+        if (!this.draggedPattern) return;
+        if (e.target.closest('#infiniteCanvas') && this.mode === 'infinite') {
+            this.placePatternInfinite(e, this.draggedPattern);
+            this.showToast(`图案已放置到无限宇宙`);
+            return;
+        }
+        const cellPos = this.getCellFromEvent(e);
+        if (cellPos) {
+            const { row, col } = cellPos;
+            const p = this.draggedPattern;
+            const startRow = row - Math.floor(p.length / 2), startCol = col - Math.floor(p[0].length / 2);
+            this.pastePattern(p, startRow, startCol);
+            this.showToast(`图案已放置`);
+        }
+    }
+
+    createGhostElement(pattern, isPastingGhost = false) {
+        this.removeGhostElement();
+        const ghost = document.createElement('div');
+        ghost.className = 'ghost-preview';
+        const preview = document.createElement('div');
+        preview.className = 'pattern-preview';
+        const rows = pattern.length, cols = pattern[0]?.length || 0;
+        preview.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+        const ghostCellSize = isPastingGhost ? this.cellSize.width : 6;
+        preview.style.width = `${cols * (ghostCellSize + 1)}px`;
+        preview.style.height = `${rows * (ghostCellSize + 1)}px`;
+        let innerHTML = '';
+        for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) innerHTML += `<div class="mini-cell ${pattern[i][j] ? 'alive' : ''}" style="width:${ghostCellSize}px; height:${ghostCellSize}px;"></div>`;
+        preview.innerHTML = innerHTML;
+        ghost.appendChild(preview);
+        this.dom.ghost = ghost;
+        document.body.appendChild(ghost);
+    }
+
+    updateGhostPosition(e) {
+        if (this.dom.ghost) {
+            this.dom.ghost.style.left = `${e.clientX}px`;
+            this.dom.ghost.style.top = `${e.clientY}px`;
+        }
+    }
+
+    removeGhostElement() {
+        if (this.dom.ghost) this.dom.ghost.remove(), this.dom.ghost = null;
+    }
+
+    showPreview(e, pattern) {
+        this.clearPreview();
+        if (!pattern) return;
+        const cellPos = this.getCellFromEvent(e);
+        if (cellPos) {
+            const { row, col } = cellPos;
+            const pHeight = pattern.length, pWidth = pattern[0].length;
+            const startRow = row - Math.floor(pHeight / 2), startCol = col - Math.floor(pWidth / 2);
+            for (let i = 0; i < pHeight; i++) for (let j = 0; j < pWidth; j++) if (pattern[i][j]) {
+                const r = startRow + i, c = startCol + j;
+                const cell = this.dom.grid.children[r * this.cols + c];
+                if (cell) cell.classList.add('preview'), this.previewCells.push(cell);
+            }
+        }
+    }
+
+    clearPreview() {
+        this.previewCells.forEach(cell => cell.classList.remove('preview'));
+        this.previewCells = [];
+    }
+
+    handlePatternActionsClick(e) {
+        const button = e.target.closest('.pattern-action-btn');
+        if (!button) return;
+        const { action, patternName } = button.dataset;
+        PATTERNS_DATA[patternName].pattern = this.transformPattern(PATTERNS_DATA[patternName].pattern, action);
+        this.filterPatterns(this.currentCategory);
+    }
+
+    transformPattern(pattern, action) {
+        if (!pattern || pattern.length === 0) return pattern;
+        const rows = pattern.length, cols = pattern[0].length;
+        let newPattern;
+        switch (action) {
+            case 'rotate':
+                newPattern = Array(cols).fill(null).map(() => Array(rows).fill(0));
+                for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) newPattern[c][rows - 1 - r] = pattern[r][c];
+                break;
+            case 'flip-h':
+                newPattern = pattern.map(row => [...row].reverse());
+                break;
+            case 'flip-v':
+                newPattern = [...pattern].reverse();
+                break;
+            default:
+                return pattern;
+        }
+        return newPattern;
+    }
+
+    toggleModal(show) {
+        this.dom.saveModal.classList.toggle('show', show);
+        if (show) this.dom.saveNameInput.value = `狀態_${new Date().toLocaleDateString()}`;
+    }
+
+    saveState() {
+        const name = this.dom.saveNameInput.value.trim();
+        if (!name) return this.showToast('請輸入存檔名稱', 'warning');
+        const state = { name, grid: this.grid, generation: this.generation, rows: this.rows, cols: this.cols, isBounded: this.isBounded, timestamp: Date.now() };
+        let savedStates = JSON.parse(localStorage.getItem('gameOfLifeStates') || '[]');
+        savedStates.push(state);
+        localStorage.setItem('gameOfLifeStates', JSON.stringify(savedStates));
+        this.showToast('狀態已儲存');
+        this.loadSavedStates();
+    }
+
+    loadSavedStates() {
+        const savedStates = JSON.parse(localStorage.getItem('gameOfLifeStates') || '[]');
+        this.dom.savedStatesList.innerHTML = savedStates.length ? savedStates.map((state, index) => `<div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 5px; margin-bottom: 5px;"><div>${state.name} <small>(${new Date(state.timestamp).toLocaleString()})</small></div><div><button class="btn" data-action="load" data-index="${index}">載入</button><button class="btn danger" data-action="delete" data-index="${index}">刪除</button></div></div>`).join('') : '<p>尚無存檔。</p>';
+    }
+
+    handleSavedStateClick(e) {
+        const target = e.target.closest('button');
+        if (!target) return;
+        const { action, index } = target.dataset;
+        let savedStates = JSON.parse(localStorage.getItem('gameOfLifeStates') || '[]');
+        if (action === 'load') {
+            const state = savedStates[index];
+            if (state) {
+                this.pause();
+                this.rows = state.rows;
+                this.cols = state.cols;
+                this.isBounded = state.isBounded || false;
+                this.grid = state.grid;
+                this.generation = state.generation;
+                this.dom.gridSizeSelect.value = `${state.rows},${state.cols},${this.isBounded}`;
+                this.createGridElements();
+                this.updateFullGridDisplay();
+                this.updateStats();
+                this.toggleModal(false);
+                this.showToast(`已載入 "${state.name}" (${this.isBounded ? '有界模式' : '无界模式'})`);
+            }
+        } else if (action === 'delete') {
+            savedStates.splice(index, 1);
+            localStorage.setItem('gameOfLifeStates', JSON.stringify(savedStates));
+            this.loadSavedStates();
+        }
+    }
+
+    toggleFullscreen() {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen();
+    }
+
+    exportImage() {
+        const patternInfo = gridToRLE(this.grid);
+        if (!patternInfo || patternInfo.width === 0) return this.showToast('画布是空的，无法导出', 'warning');
+        const ruleString = `B${this.rules.b.join('')}/S${this.rules.s.join('')}`;
+        const header = `x = ${patternInfo.width}, y = ${patternInfo.height}, rule = ${ruleString}`;
+        const fullRLEString = header + '\n' + patternInfo.rle;
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const minCellSize = 8, maxCellSize = 20, maxPatternWidth = 600;
+        let cellSize = Math.min(maxCellSize, Math.max(minCellSize, Math.floor(maxPatternWidth / patternInfo.width)));
+        const padding = 20, fontHeight = 14, lineHeight = 18;
+        const patternPixelWidth = patternInfo.width * cellSize, patternPixelHeight = patternInfo.height * cellSize;
+        ctx.font = `${fontHeight}px monospace`;
+        const lines = fullRLEString.split('\n').flatMap(line => {
+            const lineLines = []; let currentLine = '';
+            for (const char of line) {
+                const testLine = currentLine + char;
+                if (ctx.measureText(testLine).width > patternPixelWidth - padding && currentLine) {
+                    lineLines.push(currentLine);
+                    currentLine = char;
+                } else currentLine = testLine;
+            }
+            lineLines.push(currentLine);
+            return lineLines;
+        });
+        const textHeight = lines.length * lineHeight;
+        canvas.width = Math.max(patternPixelWidth, 400);
+        canvas.height = patternPixelHeight + textHeight + padding * 2;
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        let minRow = this.rows, maxRow = -1, minCol = this.cols, maxCol = -1, hasLiveCells = false;
+        for (let i = 0; i < this.rows; i++) for (let j = 0; j < this.cols; j++) if (this.grid[i][j]) {
+            hasLiveCells = true;
+            minRow = Math.min(minRow, i); maxRow = Math.max(maxRow, i);
+            minCol = Math.min(minCol, j); maxCol = Math.max(maxCol, j);
+        }
+        if (hasLiveCells) {
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim();
+            const offsetX = (canvas.width - patternPixelWidth) / 2;
+            for (let i = minRow; i <= maxRow; i++) for (let j = minCol; j <= maxCol; j++) if (this.grid[i][j]) {
+                const x = offsetX + (j - minCol) * cellSize, y = (i - minRow) * cellSize;
+                ctx.fillRect(x, y, cellSize, cellSize);
+            }
+        }
+        ctx.fillStyle = 'white';
+        ctx.font = `${fontHeight}px monospace`;
+        let y = patternPixelHeight + padding + fontHeight;
+        for (const line of lines) {
+            ctx.fillText(line, padding / 2, y);
+            y += lineHeight;
+        }
+        const link = document.createElement('a');
+        link.download = `生命游戏_第${this.generation}代_${ruleString}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+        this.showToast(`已导出带RLE描述的PNG图片 (${patternInfo.width}x${patternInfo.height})`, 'success');
+    }
+
+    showToast(message, type = 'success') {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.classList.add('show'), 10);
+        setTimeout(() => { toast.classList.remove('show'); toast.addEventListener('transitionend', () => toast.remove()); }, 3000);
+    }
+
+    createPatternCategories() {
+        const categories = ['all', 'static', 'oscillator', 'spaceship', 'gun', 'complex'];
+        const categoryMap = { 'all': '全部', 'static': '🏠 静物', 'oscillator': '🔄 振荡器', 'spaceship': '🚀 飞船', 'gun': '🔫 发射器', 'complex': '⚡ 复杂'};
+        this.dom.categoryTabs.innerHTML = categories.map(cat => `<button class="category-tab ${cat === this.currentCategory ? 'active' : ''}" data-category="${cat}">${categoryMap[cat] || cat}</button>`).join('');
+    }
+
+    filterPatterns(category = 'all') {
+        this.currentCategory = category;
+        document.querySelectorAll('#categoryTabs .category-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.category === category));
+        const filtered = Object.entries(PATTERNS_DATA).filter(([_, data]) => category === 'all' || data.category === category);
+        this.dom.patternGrid.innerHTML = filtered.map(([name, data]) => {
+            const p = data.pattern, rows = p.length, cols = p[0]?.length || 0;
+            let previewHTML = `<div class="pattern-preview" style="grid-template-columns: repeat(${cols}, 1fr);">`;
+            for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) previewHTML += `<div class="mini-cell ${p[i][j] ? 'alive' : ''}"></div>`;
+            previewHTML += '</div>';
+            return `<div class="pattern-card" draggable="true" data-pattern-name="${name}">${previewHTML}<div class="pattern-name">${name}</div><div class="pattern-actions"><button class="pattern-action-btn" data-action="rotate" data-pattern-name="${name}" title="旋轉">↻</button><button class="pattern-action-btn" data-action="flip-h" data-pattern-name="${name}" title="左右顛倒">↔️</button><button class="pattern-action-btn" data-action="flip-v" data-pattern-name="${name}" title="上下顛倒">↕️</button></div></div>`;
+        }).join('');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => window.game = new GameOfLife());
+    </script>
+</body>
+</html>
