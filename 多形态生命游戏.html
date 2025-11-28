@@ -1,0 +1,2143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>整合生命游戏 - 方形、六边形与三角形 (已优化)</title>
+    <style>
+        :root {
+            --primary-color: #3498db;
+            --secondary-color: #2980b9;
+            --danger-color: #e74c3c;
+            --success-color: #2ecc71;
+            --warning-color: #f39c12;
+            --info-color: #00ffff;
+            --light-text: #ecf0f1;
+            --dark-bg: rgba(0, 0, 0, 0.1);
+            --panel-bg: rgba(255, 255, 255, 0.1);
+            --grid-bg: #1d222b;
+            --cell-dead-color: #343a40;
+            --cell-border-color: #495057;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--light-text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            margin-bottom: 10px;
+        }
+
+        .game-selector {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .game-tab {
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 15px;
+            padding: 15px 30px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1.1em;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .game-tab:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+        }
+
+        .game-tab.active {
+            background: var(--primary-color);
+            border-color: var(--light-text);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3);
+        }
+
+        .game-container {
+            display: none;
+            width: 100%;
+        }
+
+        .game-container.active {
+            display: block;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.18);
+        }
+
+        .btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            margin: 5px;
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .btn.danger { background: var(--danger-color); }
+        .btn.success { background: var(--success-color); }
+        .btn.warning { background: var(--warning-color); }
+
+        .controls-row {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 5px;
+        }
+
+        .input-group input, .input-group select {
+            padding: 6px 10px;
+            border-radius: 15px;
+            border: 2px solid rgba(255,255,255,0.3);
+            background: var(--panel-bg);
+            color: white;
+            font-size: 14px;
+        }
+
+        /* --- 统一的游戏布局样式 --- */
+        .game-layout {
+            display: flex;
+            gap: 20px;
+            min-height: 600px;
+        }
+
+        .left-panel {
+            width: 350px;
+            flex-shrink: 0;
+        }
+
+        .right-panel {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .grid-container {
+            flex-grow: 1;
+            background-color: rgba(0,0,0,0.3);
+            border: 3px solid rgba(0,0,0,0.3);
+            border-radius: 10px;
+            padding: 5px;
+            position: relative;
+            overflow: hidden;
+            min-height: 400px;
+        }
+        
+        .grid-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: var(--grid-bg);
+            border-radius: 8px;
+            cursor: grab;
+        }
+
+        .grid-canvas:active {
+            cursor: grabbing;
+        }
+
+        .grid-canvas.drawing-mode {
+            cursor: crosshair;
+        }
+        .grid-canvas.pasting-mode {
+            cursor: copy;
+        }
+        
+        /* --- 游戏统计和规则 --- */
+        .game-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-label {
+            font-size: 0.8em;
+            opacity: 0.8;
+        }
+
+        .rules-content {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .rule-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--dark-bg);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+        
+        /* --- 选择和右键菜单样式 --- */
+        .context-menu {
+            position: fixed;
+            z-index: 10000;
+            width: 120px;
+            height: 120px;
+            pointer-events: none;
+            display: none;
+        }
+
+        .context-menu.show {
+            display: block;
+        }
+
+        .context-menu-item {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(44, 62, 80, 0.85);
+            backdrop-filter: blur(5px);
+            border: 1px solid var(--light-text);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28), background-color 0.2s;
+            pointer-events: all;
+            font-size: 20px;
+        }
+
+        .context-menu-item:hover {
+            background-color: var(--primary-color);
+        }
+        
+        .context-menu.show .menu-item-1 { transform: translateY(-55px); }
+        .context-menu.show .menu-item-2 { transform: rotate(60deg) translateY(-55px) rotate(-60deg); }
+        .context-menu.show .menu-item-3 { transform: rotate(120deg) translateY(-55px) rotate(-120deg); }
+        .context-menu.show .menu-item-4 { transform: rotate(180deg) translateY(-55px) rotate(-180deg); }
+        .context-menu.show .menu-item-5 { transform: rotate(240deg) translateY(-55px) rotate(-240deg); }
+        .context-menu.show .menu-item-6 { transform: rotate(300deg) translateY(-55px) rotate(-300deg); }
+
+        /* OPTIMIZATION: Combine transforms on hover to prevent jumping */
+        .context-menu.show .menu-item-1:hover { transform: translateY(-55px) scale(1.15); }
+        .context-menu.show .menu-item-2:hover { transform: rotate(60deg) translateY(-55px) rotate(-60deg) scale(1.15); }
+        .context-menu.show .menu-item-3:hover { transform: rotate(120deg) translateY(-55px) rotate(-120deg) scale(1.15); }
+        .context-menu.show .menu-item-4:hover { transform: rotate(180deg) translateY(-55px) rotate(-180deg) scale(1.15); }
+        .context-menu.show .menu-item-5:hover { transform: rotate(240deg) translateY(-55px) rotate(-240deg) scale(1.15); }
+        .context-menu.show .menu-item-6:hover { transform: rotate(300deg) translateY(-55px) rotate(-300deg) scale(1.15); }
+
+
+        @media (max-width: 768px) {
+            .game-layout {
+                flex-direction: column;
+            }
+            .left-panel {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🧬 整合生命游戏</h1>
+            <p>探索细胞自动机的演化奥秘 - 方形、六边形与三角形网格</p>
+        </header>
+
+        <div class="game-selector">
+            <div class="game-tab active" data-game="square">
+                🔲 方形网格
+            </div>
+            <div class="game-tab" data-game="hex">
+                ⬡ 六边形网格
+            </div>
+            <div class="game-tab" data-game="triangle">
+                🔺 三角形网格
+            </div>
+        </div>
+
+        <!-- 方形网格游戏 -->
+        <div id="square-game" class="game-container active">
+            <div class="game-layout">
+                <div class="left-panel">
+                    <div class="panel">
+                        <h3>🎮 方形网格游戏规则</h3>
+                        <div class="rules-content" id="square-rules-display">
+                            <div class="rule-item">
+                                <span>🎯</span>
+                                <span><b>怎么玩:</b> 点击格子创造生命。在<b>绘图模式</b>下，左键拖拽可批量绘制，右键拖拽可框选区域进行复制、旋转等操作。</span>
+                            </div>
+                            <div class="rule-item">
+                                <span>❤️</span>
+                                <span><b>生命存活:</b> 小生命身边有2-3个好朋友时会继续快乐生活</span>
+                            </div>
+                            <div class="rule-item">
+                                <span>🌱</span>
+                                <span><b>新生命诞生:</b> 空格子周围正好有3个生命朋友时，会诞生一个新的小生命</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="game-stats">
+                            <div><div class="stat-value" id="square-generation">0</div><div class="stat-label">世代</div></div>
+                            <div><div class="stat-value" id="square-population">0</div><div class="stat-label">活细胞</div></div>
+                            <div><div class="stat-value" id="square-max-population">0</div><div class="stat-label">最大种群</div></div>
+                            <div><div class="stat-value" id="square-max-pop-gen">0</div><div class="stat-label">最大种群代数</div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="right-panel">
+                    <div id="square-grid-container" class="grid-container">
+                        <canvas id="square-canvas" class="grid-canvas"></canvas>
+                        <div id="square-contextMenu" class="context-menu">
+                            <div class="context-menu-item menu-item-1" data-action="copy" title="复制">📝</div>
+                            <div class="context-menu-item menu-item-2" data-action="pan" title="平移">🖐️</div>
+                            <div class="context-menu-item menu-item-3" data-action="rotate" title="旋转 (↺)">↻</div>
+                            <div class="context-menu-item menu-item-4" data-action="flip-h" title="水平翻转">↔️</div>
+                            <div class="context-menu-item menu-item-5" data-action="flip-v" title="垂直翻转">↕️</div>
+                            <div class="context-menu-item menu-item-6" data-action="delete" title="删除选中区域">🗑️</div>
+                        </div>
+                    </div>
+                    <div class="panel">
+                        <div class="controls-row">
+                            <button id="square-play-pause" class="btn success">▶️ 开始</button>
+                            <button id="square-step" class="btn">⏭️ 单步</button>
+                            <button id="square-reset" class="btn danger">🔄 重置</button>
+                            <button id="square-random" class="btn">🎲 随机</button>
+                            <button id="square-draw-mode" class="btn">✏️ 绘图</button>
+                            <button id="square-undo" class="btn" disabled>↩️ 撤销</button>
+                        </div>
+                        <div class="controls-row">
+                            <div class="input-group">
+                                <label for="square-speed">速度:</label>
+                                <input type="range" id="square-speed" min="1" max="20" value="5" step="1">
+                                <span id="square-speed-value">5 代/秒</span>
+                            </div>
+                            <div class="input-group">
+                                <label for="square-rule-b">诞生 (B):</label>
+                                <input type="text" id="square-rule-b" value="3" size="6">
+                            </div>
+                            <div class="input-group">
+                                <label for="square-rule-s">存活 (S):</label>
+                                <input type="text" id="square-rule-s" value="23" size="6">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 六边形网格游戏 -->
+        <div id="hex-game" class="game-container">
+            <div class="game-layout">
+                <div class="left-panel">
+                    <div class="panel">
+                        <h3>🎮 六边形网格游戏规则</h3>
+                        <div class="rules-content" id="hex-rules-display">
+                            <!-- JS will populate this -->
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="game-stats">
+                            <div><div class="stat-value" id="hex-generation">0</div><div class="stat-label">世代</div></div>
+                            <div><div class="stat-value" id="hex-population">0</div><div class="stat-label">活细胞</div></div>
+                            <div><div class="stat-value" id="hex-max-population">0</div><div class="stat-label">最大种群</div></div>
+                            <div><div class="stat-value" id="hex-max-pop-gen">0</div><div class="stat-label">最大种群代数</div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="right-panel">
+                    <div class="grid-container">
+                        <canvas id="hex-canvas" class="grid-canvas"></canvas>
+                        <div id="hex-contextMenu" class="context-menu">
+                            <div class="context-menu-item menu-item-1" data-action="copy" title="复制">📝</div>
+                            <div class="context-menu-item menu-item-2" data-action="pan" title="平移">🖐️</div>
+                            <div class="context-menu-item menu-item-3" data-action="rotate" title="旋转60° (↺)">↻</div>
+                            <div class="context-menu-item menu-item-4" data-action="flip-h" title="水平翻转">↔️</div>
+                            <div class="context-menu-item menu-item-5" data-action="flip-v" title="垂直翻转">↕️</div>
+                            <div class="context-menu-item menu-item-6" data-action="delete" title="删除选中区域">🗑️</div>
+                        </div>
+                    </div>
+                    
+                    <div class="panel">
+                        <div class="controls-row">
+                            <button id="hex-play-pause" class="btn success">▶️ 开始</button>
+                            <button id="hex-step" class="btn">⏭️ 单步</button>
+                            <button id="hex-reset" class="btn danger">🔄 重置</button>
+                            <button id="hex-random" class="btn">🎲 随机</button>
+                            <button id="hex-draw-mode" class="btn">✏️ 绘图</button>
+                            <button id="hex-undo" class="btn" disabled>↩️ 撤销</button>
+                        </div>
+                        <div class="controls-row">
+                            <div class="input-group">
+                                <label for="hex-speed">速度:</label>
+                                <input type="range" id="hex-speed" min="1" max="30" value="10" step="1">
+                                <span id="hex-speed-value">10 代/秒</span>
+                            </div>
+                            <div class="input-group">
+                                <label for="hex-rule-b">诞生 (B):</label>
+                                <input type="text" id="hex-rule-b" value="2" size="6">
+                            </div>
+                            <div class="input-group">
+                                <label for="hex-rule-s">存活 (S):</label>
+                                <input type="text" id="hex-rule-s" value="34" size="6">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 三角形网格游戏 -->
+        <div id="triangle-game" class="game-container">
+            <div class="game-layout">
+                <div class="left-panel">
+                    <div class="panel">
+                        <h3>🎮 三角形网格游戏规则</h3>
+                        <div class="rules-content" id="triangle-rules-display">
+                           <!-- JS will populate this -->
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="game-stats">
+                            <div><div class="stat-value" id="triangle-generation">0</div><div class="stat-label">世代</div></div>
+                            <div><div class="stat-value" id="triangle-population">0</div><div class="stat-label">活细胞</div></div>
+                            <div><div class="stat-value" id="triangle-max-population">0</div><div class="stat-label">最大种群</div></div>
+                            <div><div class="stat-value" id="triangle-max-pop-gen">0</div><div class="stat-label">最大种群代数</div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="right-panel">
+                    <div class="grid-container">
+                        <canvas id="triangle-canvas" class="grid-canvas"></canvas>
+                        <div id="triangle-contextMenu" class="context-menu">
+                            <div class="context-menu-item menu-item-1" data-action="copy" title="复制">📝</div>
+                            <div class="context-menu-item menu-item-2" data-action="pan" title="平移">🖐️</div>
+                            <div class="context-menu-item menu-item-3" data-action="rotate" title="旋转180° (↺)">↻</div>
+                            <div class="context-menu-item menu-item-4" data-action="flip-h" title="水平翻转">↔️</div>
+                            <div class="context-menu-item menu-item-5" data-action="flip-v" title="垂直翻转">↕️</div>
+                            <div class="context-menu-item menu-item-6" data-action="delete" title="删除选中区域">🗑️</div>
+                        </div>
+                    </div>
+                    
+                    <div class="panel">
+                        <div class="controls-row">
+                            <button id="triangle-play-pause" class="btn success">▶️ 开始</button>
+                            <button id="triangle-step" class="btn">⏭️ 单步</button>
+                            <button id="triangle-reset" class="btn danger">🔄 重置</button>
+                            <button id="triangle-random" class="btn">🎲 随机</button>
+                            <button id="triangle-draw-mode" class="btn">✏️ 绘图</button>
+                            <button id="triangle-undo" class="btn" disabled>↩️ 撤销</button>
+                        </div>
+                        <div class="controls-row">
+                            <div class="input-group">
+                                <label for="triangle-speed">速度:</label>
+                                <input type="range" id="triangle-speed" min="1" max="20" value="10" step="1">
+                                <span id="triangle-speed-value">10 代/秒</span>
+                            </div>
+                            <div class="input-group">
+                                <label for="triangle-rule-b">诞生 (B):</label>
+                                <input type="text" id="triangle-rule-b" value="3" size="6">
+                            </div>
+                            <div class="input-group">
+                                <label for="triangle-rule-s">存活 (S):</label>
+                                <input type="text" id="triangle-rule-s" value="23" size="6">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 游戏切换功能
+        class GameManager {
+            constructor() {
+                this.currentGameType = 'square';
+                this.games = {
+                    square: null,
+                    hex: null,
+                    triangle: null
+                };
+                this.setupGameSwitcher();
+                this.initializeCurrentGame();
+            }
+
+            setupGameSwitcher() {
+                const tabs = document.querySelectorAll('.game-tab');
+                tabs.forEach(tab => {
+                    tab.addEventListener('click', () => {
+                        const gameType = tab.dataset.game;
+                        this.switchGame(gameType);
+                    });
+                });
+            }
+
+            switchGame(gameType) {
+                if (this.currentGameType === gameType) return;
+
+                // 停止当前游戏
+                const currentGame = this.games[this.currentGameType];
+                if (currentGame && typeof currentGame.pause === 'function') {
+                    currentGame.pause();
+                }
+
+                // 更新UI
+                document.querySelectorAll('.game-tab').forEach(tab => tab.classList.remove('active'));
+                document.querySelector(`[data-game="${gameType}"]`).classList.add('active');
+
+                document.querySelectorAll('.game-container').forEach(container => container.classList.remove('active'));
+                document.getElementById(`${gameType}-game`).classList.add('active');
+
+                this.currentGameType = gameType;
+
+                // 初始化新游戏（如果需要）
+                this.initializeCurrentGame();
+            }
+            
+            initializeCurrentGame() {
+                if (this.games[this.currentGameType]) {
+                    // 如果游戏已初始化，确保其画布尺寸正确
+                    const game = this.games[this.currentGameType];
+                    if (typeof game.resizeCanvas === 'function') {
+                         game.resizeCanvas();
+                    }
+                    return;
+                }
+
+                switch(this.currentGameType) {
+                    case 'square':
+                        this.games.square = new SquareGameOfLife();
+                        break;
+                    case 'hex':
+                        this.games.hex = new HexGameOfLife();
+                        break;
+                    case 'triangle':
+                        this.games.triangle = new TriangleGameOfLife();
+                        break;
+                }
+            }
+        }
+
+        // 方形网格生命游戏类
+        class SquareGameOfLife {
+            constructor() {
+                // 游戏状态属性
+                this.isRunning = false;
+                this.generation = 0;
+                this.population = 0;
+                this.maxPopulation = 0;
+                this.maxPopulationGeneration = 0;
+                this.speed = 5; // 代/秒
+                this.ruleB = [3]; // 诞生规则
+                this.ruleS = [2, 3]; // 存活规则
+                this.intervalId = null;
+                
+                // 无界宇宙模式相关属性
+                this.liveCells = new Set(); // 存储活细胞的坐标字符串
+                this.viewport = {
+                    scale: 15, // 初始缩放级别
+                    offsetX: 0,
+                    offsetY: 0,
+                    isDragging: false,
+                    lastMousePos: { x: 0, y: 0 }
+                };
+
+                // --- 绘图与历史属性 ---
+                this.drawMode = false;
+                this.isDrawing = false;
+                this.drawingCellValue = true; // true for alive, false for dead
+                this.history = [];
+
+                // --- 选择与剪贴板属性 ---
+                this.isSelecting = false;
+                this.selectionRect = {}; // {startX, startY, endX, endY}
+                this.clipboard = null; // 存储复制的图案
+                this.isPasting = false; // 是否处于粘贴模式
+                
+                this.dom = {
+                    gridContainer: document.getElementById('square-grid-container'),
+                    canvas: document.getElementById('square-canvas'),
+                    generation: document.getElementById('square-generation'),
+                    population: document.getElementById('square-population'),
+                    maxPopulation: document.getElementById('square-max-population'),
+                    maxPopGen: document.getElementById('square-max-pop-gen'),
+                    playPauseBtn: document.getElementById('square-play-pause'),
+                    stepBtn: document.getElementById('square-step'),
+                    resetBtn: document.getElementById('square-reset'),
+                    randomBtn: document.getElementById('square-random'),
+                    speedSlider: document.getElementById('square-speed'),
+                    speedValue: document.getElementById('square-speed-value'),
+                    ruleBInput: document.getElementById('square-rule-b'),
+                    ruleSInput: document.getElementById('square-rule-s'),
+                    drawModeBtn: document.getElementById('square-draw-mode'),
+                    undoBtn: document.getElementById('square-undo'),
+                    contextMenu: document.getElementById('square-contextMenu')
+                };
+                
+                this.initialize();
+            }
+
+            initialize() {
+                this.ctx = this.dom.canvas.getContext('2d');
+                this.resizeCanvas();
+                this.setupEventListeners();
+                this.updateRules();
+                this.updateStats();
+                this.draw();
+            }
+
+            resizeCanvas() {
+                const canvas = this.dom.canvas;
+                const container = this.dom.gridContainer;
+                
+                const oldWidth = canvas.width;
+                const oldHeight = canvas.height;
+                const newWidth = container.clientWidth;
+                const newHeight = container.clientHeight;
+
+                if (oldWidth !== newWidth || oldHeight !== newHeight) {
+                    canvas.width = newWidth;
+                    canvas.height = newHeight;
+                    
+                    // 调整视口偏移，使中心点保持不变
+                    if (oldWidth > 0) {
+                        this.viewport.offsetX += (newWidth - oldWidth) / 2;
+                        this.viewport.offsetY += (newHeight - oldHeight) / 2;
+                    } else {
+                        // 首次设置，居中视图
+                        this.viewport.offsetX = newWidth / 2;
+                        this.viewport.offsetY = newHeight / 2;
+                    }
+                    
+                    this.draw();
+                }
+            }
+
+            updateRules() {
+                const bText = this.dom.ruleBInput.value;
+                const sText = this.dom.ruleSInput.value;
+                this.ruleB = bText.split('').map(Number).filter(n => !isNaN(n));
+                this.ruleS = sText.split('').map(Number).filter(n => !isNaN(n));
+            }
+
+            setupEventListeners() {
+                this.dom.playPauseBtn.addEventListener('click', () => this.isRunning ? this.pause() : this.play());
+                this.dom.stepBtn.addEventListener('click', () => this.step());
+                this.dom.resetBtn.addEventListener('click', () => this.reset());
+                this.dom.randomBtn.addEventListener('click', () => this.randomize());
+                
+                this.dom.speedSlider.addEventListener('input', (e) => {
+                    this.speed = parseInt(e.target.value);
+                    this.dom.speedValue.textContent = `${this.speed} 代/秒`;
+                    if (this.isRunning) {
+                        this.pause();
+                        this.play();
+                    }
+                });
+
+                this.dom.ruleBInput.addEventListener('input', () => this.updateRules());
+                this.dom.ruleSInput.addEventListener('input', () => this.updateRules());
+                this.dom.drawModeBtn.addEventListener('click', () => this.toggleDrawMode());
+                this.dom.undoBtn.addEventListener('click', () => this.undo());
+
+                const canvas = this.dom.canvas;
+                canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+                canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+                canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+                canvas.addEventListener('wheel', (e) => this.handleWheel(e));
+                
+                canvas.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                });
+                
+                this.dom.contextMenu.addEventListener('click', (e) => this.handleContextMenuClick(e));
+                document.addEventListener('click', (e) => {
+                    if (!this.dom.gridContainer.contains(e.target)) {
+                        this.hideContextMenu();
+                    }
+                });
+                
+                window.addEventListener('resize', () => this.resizeCanvas());
+            }
+            
+            saveToHistory() {
+                if (this.history.length > 50) this.history.shift();
+                this.history.push(new Set(this.liveCells));
+                this.dom.undoBtn.disabled = false;
+            }
+
+            undo() {
+                if (this.history.length === 0) return;
+                this.liveCells = this.history.pop();
+                if (this.generation > 0) this.generation--;
+                this.draw();
+                this.updateStats();
+                if (this.history.length === 0) {
+                    this.dom.undoBtn.disabled = true;
+                }
+            }
+
+            nextGeneration() {
+                this.saveToHistory();
+                
+                const newLiveCells = new Set();
+                const cellsToCheck = new Set();
+                
+                for (const cellKey of this.liveCells) {
+                    const [x, y] = cellKey.split(',').map(Number);
+                    for (let i = -1; i <= 1; i++) {
+                        for (let j = -1; j <= 1; j++) {
+                            cellsToCheck.add(`${x + j},${y + i}`);
+                        }
+                    }
+                }
+                
+                for (const cellKey of cellsToCheck) {
+                    const [x, y] = cellKey.split(',').map(Number);
+                    const neighbors = this.countNeighbors(x, y);
+                    const isAlive = this.liveCells.has(cellKey);
+                    
+                    if (isAlive && this.ruleS.includes(neighbors)) {
+                        newLiveCells.add(cellKey);
+                    } else if (!isAlive && this.ruleB.includes(neighbors)) {
+                        newLiveCells.add(cellKey);
+                    }
+                }
+                
+                this.liveCells = newLiveCells;
+                this.draw();
+                this.generation++;
+                this.updateStats();
+            }
+
+            play() {
+                if (this.isRunning) return;
+                this.isRunning = true;
+                this.dom.playPauseBtn.textContent = '⏸️ 暂停';
+                this.dom.playPauseBtn.classList.replace('success', 'warning');
+                this.intervalId = setInterval(() => this.nextGeneration(), 1000 / this.speed);
+            }
+
+            pause() {
+                if (!this.isRunning) return;
+                this.isRunning = false;
+                this.dom.playPauseBtn.textContent = '▶️ 开始';
+                this.dom.playPauseBtn.classList.replace('warning', 'success');
+                clearInterval(this.intervalId);
+                this.intervalId = null;
+            }
+
+            step() {
+                this.pause();
+                this.nextGeneration();
+            }
+
+            reset() {
+                this.pause();
+                this.liveCells.clear();
+                this.draw();
+                this.generation = 0;
+                this.maxPopulation = 0;
+                this.maxPopulationGeneration = 0;
+                this.history = [];
+                this.dom.undoBtn.disabled = true;
+                this.updateStats();
+            }
+
+            randomize() {
+                this.pause();
+                this.saveToHistory();
+                this.liveCells.clear();
+                const { x: centerX, y: centerY } = this.screenToWorld(this.dom.canvas.width / 2, this.dom.canvas.height / 2);
+                const viewWidth = this.dom.canvas.width / this.viewport.scale;
+                const viewHeight = this.dom.canvas.height / this.viewport.scale;
+
+                for (let x = Math.floor(centerX - viewWidth / 3); x < Math.floor(centerX + viewWidth / 3); x++) {
+                    for (let y = Math.floor(centerY - viewHeight / 3); y < Math.floor(centerY + viewHeight / 3); y++) {
+                        if (Math.random() < 0.3) {
+                            this.liveCells.add(`${x},${y}`);
+                        }
+                    }
+                }
+                this.draw();
+                this.updateStats();
+            }
+            
+            updateStats() {
+                this.population = this.liveCells.size;
+                if (this.population > this.maxPopulation) {
+                    this.maxPopulation = this.population;
+                    this.maxPopulationGeneration = this.generation;
+                }
+                this.dom.generation.textContent = this.generation;
+                this.dom.population.textContent = this.population;
+                this.dom.maxPopulation.textContent = this.maxPopulation;
+                this.dom.maxPopGen.textContent = this.maxPopulationGeneration;
+            }
+
+            draw() {
+                const ctx = this.ctx;
+                const canvas = this.dom.canvas;
+                
+                ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid-bg').trim();
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.save();
+                ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
+                ctx.scale(this.viewport.scale, this.viewport.scale);
+
+                const viewBounds = {
+                    left: -this.viewport.offsetX / this.viewport.scale,
+                    right: (canvas.width - this.viewport.offsetX) / this.viewport.scale,
+                    top: -this.viewport.offsetY / this.viewport.scale,
+                    bottom: (canvas.height - this.viewport.offsetY) / this.viewport.scale,
+                };
+
+                // 绘制网格线
+                if (this.viewport.scale > 5) {
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 1 / this.viewport.scale;
+                    ctx.beginPath();
+                    for (let x = Math.floor(viewBounds.left); x <= viewBounds.right; x++) {
+                        ctx.moveTo(x, viewBounds.top);
+                        ctx.lineTo(x, viewBounds.bottom);
+                    }
+                    for (let y = Math.floor(viewBounds.top); y <= viewBounds.bottom; y++) {
+                        ctx.moveTo(viewBounds.left, y);
+                        ctx.lineTo(viewBounds.right, y);
+                    }
+                    ctx.stroke();
+                }
+                
+                // 绘制活细胞
+                ctx.fillStyle = '#ff6b6b';
+                for (const cellKey of this.liveCells) {
+                    const [x, y] = cellKey.split(',').map(Number);
+                     if (x >= viewBounds.left - 1 && x <= viewBounds.right && y >= viewBounds.top - 1 && y <= viewBounds.bottom) {
+                        ctx.fillRect(x + 0.05, y + 0.05, 0.9, 0.9);
+                    }
+                }
+
+                // 绘制选择框
+                if (this.isSelecting || (this.selectionRect.startX !== undefined && !this.isPasting)) {
+                    const { startX, startY, endX, endY } = this.selectionRect;
+                    const x = Math.min(startX, endX);
+                    const y = Math.min(startY, endY);
+                    const w = Math.abs(startX - endX) + 1;
+                    const h = Math.abs(startY - endY) + 1;
+                    ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+                    ctx.lineWidth = 2 / this.viewport.scale;
+                    ctx.setLineDash([5 / this.viewport.scale, 3 / this.viewport.scale]);
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.setLineDash([]);
+                }
+                
+                // 绘制粘贴预览
+                if (this.isPasting && this.clipboard && this.pastingPreviewPos) {
+                    ctx.fillStyle = 'rgba(231, 76, 60, 0.5)';
+                    const { pattern } = this.clipboard;
+                    const { x: startX, y: startY } = this.pastingPreviewPos;
+                     for (let i = 0; i < pattern.length; i++) {
+                        for (let j = 0; j < pattern[0].length; j++) {
+                            if (pattern[i][j]) {
+                                ctx.fillRect(startX + j + 0.05, startY + i + 0.05, 0.9, 0.9);
+                            }
+                        }
+                    }
+                }
+
+                ctx.restore();
+            }
+
+            screenToWorld(screenX, screenY) {
+                const rect = this.dom.canvas.getBoundingClientRect();
+                const x = (screenX - rect.left - this.viewport.offsetX) / this.viewport.scale;
+                const y = (screenY - rect.top - this.viewport.offsetY) / this.viewport.scale;
+                return { x, y };
+            }
+
+            handleMouseDown(e) {
+                // 隐藏上下文菜单
+                this.hideContextMenu();
+
+                // 处理粘贴模式下的左键点击
+                if (this.isPasting && e.button === 0) {
+                    this.pasteFromClipboard(e);
+                    return;
+                }
+                
+                const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+                const cellX = Math.floor(x);
+                const cellY = Math.floor(y);
+                const cellKey = `${cellX},${cellY}`;
+
+                if (this.drawMode) {
+                    if (e.button === 0) { // 左键绘制
+                        this.isDrawing = true;
+                        this.drawingCellValue = !this.liveCells.has(cellKey);
+                        this.handleCellToggle(cellKey, this.drawingCellValue);
+                    } else if (e.button === 2) { // 右键选择
+                        this.isSelecting = true;
+                        this.selectionRect = { startX: cellX, startY: cellY, endX: cellX, endY: cellY };
+                    }
+                } else { // 非绘图模式
+                    if (e.button === 0) { // 左键点击切换
+                         this.handleCellToggle(cellKey);
+                    } else if (e.button === 2) { // 右键拖拽画布
+                        this.viewport.isDragging = true;
+                        this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+                    }
+                }
+            }
+            
+            handleCellToggle(cellKey, value) {
+                this.saveToHistory();
+                const shouldBeAlive = value === undefined ? !this.liveCells.has(cellKey) : value;
+                if (shouldBeAlive) {
+                    this.liveCells.add(cellKey);
+                } else {
+                    this.liveCells.delete(cellKey);
+                }
+                this.draw();
+                this.updateStats();
+            }
+
+            handleMouseMove(e) {
+                const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+                const cellX = Math.floor(x);
+                const cellY = Math.floor(y);
+                
+                if (this.isPasting) {
+                    const { pattern } = this.clipboard;
+                    const startX = cellX - Math.floor(pattern[0].length / 2);
+                    const startY = cellY - Math.floor(pattern.length / 2);
+                    this.pastingPreviewPos = { x: startX, y: startY };
+                    this.draw();
+                    return;
+                }
+
+                if (this.isDrawing) {
+                    this.handleCellToggle(`${cellX},${cellY}`, this.drawingCellValue);
+                } else if (this.isSelecting) {
+                    this.selectionRect.endX = cellX;
+                    this.selectionRect.endY = cellY;
+                    this.draw();
+                } else if (this.viewport.isDragging) {
+                    const deltaX = e.clientX - this.viewport.lastMousePos.x;
+                    const deltaY = e.clientY - this.viewport.lastMousePos.y;
+                    this.viewport.offsetX += deltaX;
+                    this.viewport.offsetY += deltaY;
+                    this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+                    this.draw();
+                }
+            }
+
+            handleMouseUp(e) {
+                if (e.button === 2) { // 右键释放
+                    if (this.drawMode && this.isSelecting) {
+                        // 绘图模式下的右键选择完成
+                        this.isSelecting = false;
+                        this.draw();
+                        // 延迟显示上下文菜单，避免与浏览器默认菜单冲突
+                        setTimeout(() => {
+                            this.showContextMenu(e.clientX, e.clientY);
+                        }, 10);
+                    } else if (!this.drawMode && this.viewport.isDragging) {
+                        // 非绘图模式下的右键拖拽完成
+                        this.viewport.isDragging = false;
+                    }
+                } else if (e.button === 0) { // 左键释放
+                    if (this.isDrawing) {
+                        this.isDrawing = false;
+                    }
+                }
+            }
+
+            handleWheel(e) {
+                e.preventDefault();
+                const rect = this.dom.canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
+                const newScale = this.viewport.scale * scaleFactor;
+
+                const minScale = 1;
+                const maxScale = 100;
+                if (newScale < minScale || newScale > maxScale) {
+                    return;
+                }
+
+                const scaleRatio = newScale / this.viewport.scale;
+                
+                this.viewport.offsetX = mouseX - (mouseX - this.viewport.offsetX) * scaleRatio;
+                this.viewport.offsetY = mouseY - (mouseY - this.viewport.offsetY) * scaleRatio;
+                
+                this.viewport.scale = newScale;
+                
+                this.draw();
+            }
+
+            toggleDrawMode() {
+                this.drawMode = !this.drawMode;
+                this.dom.drawModeBtn.classList.toggle('warning', this.drawMode);
+                this.dom.canvas.classList.toggle('drawing-mode', this.drawMode);
+            }
+            
+            showContextMenu(x, y) {
+                const menu = this.dom.contextMenu;
+                menu.style.left = `${x - 60}px`;
+                menu.style.top = `${y - 60}px`;
+                menu.classList.add('show');
+            }
+
+            hideContextMenu() {
+                this.dom.contextMenu.classList.remove('show');
+            }
+
+            handleContextMenuClick(e) {
+                const action = e.target.closest('[data-action]')?.dataset.action;
+                if (!action) return;
+
+                this.hideContextMenu();
+                const pattern = this.extractPatternFromSelection();
+                if (!pattern) return;
+
+                const rect = this.getNormalizedSelectionRect();
+
+                switch(action) {
+                    case 'copy':
+                    case 'pan':
+                        this.clipboard = { pattern, width: rect.w, height: rect.h };
+                        if (action === 'pan') {
+                            this.clearArea(rect);
+                        }
+                        this.isPasting = true;
+                        this.dom.canvas.classList.add('pasting-mode');
+                        break;
+                    case 'rotate':
+                    case 'flip-h':
+                    case 'flip-v':
+                        this.clearArea(rect);
+                        const transformed = this.transformPattern(pattern, action);
+                        this.pastePattern(transformed, rect.x, rect.y);
+                        break;
+                    case 'delete':
+                        this.clearArea(rect);
+                        break;
+                }
+                this.selectionRect = {};
+                this.draw();
+            }
+            
+            getNormalizedSelectionRect() {
+                const { startX, startY, endX, endY } = this.selectionRect;
+                const x = Math.min(startX, endX);
+                const y = Math.min(startY, endY);
+                const w = Math.abs(startX - endX) + 1;
+                const h = Math.abs(startY - endY) + 1;
+                return { x, y, w, h };
+            }
+
+            extractPatternFromSelection() {
+                const rect = this.getNormalizedSelectionRect();
+                if (rect.w <= 0 || rect.h <= 0) return null;
+
+                const pattern = Array(rect.h).fill(null).map(() => Array(rect.w).fill(false));
+                for (let i = 0; i < rect.h; i++) {
+                    for (let j = 0; j < rect.w; j++) {
+                        const cellKey = `${rect.x + j},${rect.y + i}`;
+                        if (this.liveCells.has(cellKey)) {
+                            pattern[i][j] = true;
+                        }
+                    }
+                }
+                return pattern;
+            }
+
+            clearArea(rect) {
+                this.saveToHistory();
+                for (let i = 0; i < rect.h; i++) {
+                    for (let j = 0; j < rect.w; j++) {
+                        this.liveCells.delete(`${rect.x + j},${rect.y + i}`);
+                    }
+                }
+            }
+
+            pastePattern(pattern, startX, startY) {
+                this.saveToHistory();
+                for (let i = 0; i < pattern.length; i++) {
+                    for (let j = 0; j < pattern[0].length; j++) {
+                        if (pattern[i][j]) {
+                            this.liveCells.add(`${startX + j},${startY + i}`);
+                        }
+                    }
+                }
+            }
+            
+            pasteFromClipboard(e) {
+                if (!this.clipboard) return;
+                const { pattern } = this.clipboard;
+                const { x, y } = this.screenToWorld(e.clientX, e.clientY);
+                const startX = Math.floor(x) - Math.floor(pattern[0].length / 2);
+                const startY = Math.floor(y) - Math.floor(pattern.length / 2);
+                
+                this.pastePattern(pattern, startX, startY);
+                
+                this.isPasting = false;
+                this.clipboard = null;
+                this.pastingPreviewPos = null;
+                this.dom.canvas.classList.remove('pasting-mode');
+                this.draw();
+            }
+
+            transformPattern(pattern, action) {
+                if (!pattern || pattern.length === 0) return pattern;
+                let newPattern;
+                const rows = pattern.length;
+                const cols = pattern[0].length;
+                switch (action) {
+                    case 'rotate':
+                        newPattern = Array(cols).fill(null).map(() => Array(rows).fill(false));
+                        for (let r = 0; r < rows; r++) {
+                            for (let c = 0; c < cols; c++) {
+                                newPattern[c][rows - 1 - r] = pattern[r][c];
+                            }
+                        }
+                        break;
+                    case 'flip-h':
+                        newPattern = pattern.map(row => [...row].reverse());
+                        break;
+                    case 'flip-v':
+                        newPattern = [...pattern].reverse();
+                        break;
+                    default:
+                        return pattern;
+                }
+                return newPattern;
+            }
+
+            countNeighbors(x, y) {
+                let count = 0;
+                for (let i = -1; i <= 1; i++) {
+                    for (let j = -1; j <= 1; j++) {
+                        if (i === 0 && j === 0) continue;
+                        if (this.liveCells.has(`${x + j},${y + i}`)) count++;
+                    }
+                }
+                return count;
+            }
+        }
+
+        // 六边形网格生命游戏类
+        class HexGameOfLife {
+            constructor() {
+                this.config = {
+                    hexBaseSize: 15,
+                    minZoom: 0.1,
+                    maxZoom: 3,
+                    zoomFactor: 0.9,
+                    randomDensity: 0.3,
+                };
+                
+                this.isRunning = false;
+                this.generation = 0;
+                this.population = 0;
+                this.maxPopulation = 0;
+                this.maxPopulationGeneration = 0;
+                this.speed = 10;
+                
+                this.grid = new Map();
+                this.intervalId = null;
+                this.lastFrameTime = performance.now();
+                this.animationFrameId = null;
+                
+                this.ruleB = [2];
+                this.ruleS = [3, 4];
+                
+                this.viewport = {
+                    scale: 1,
+                    offsetX: 0,
+                    offsetY: 0,
+                    isDragging: false,
+                    lastMousePos: { x: 0, y: 0 },
+                    hasMoved: false
+                };
+                this.drawMode = false;
+                this.isDrawing = false;
+                this.drawingCellValue = true;
+                this.history = [];
+                this.isSelecting = false;
+                this.selectionRect = {};
+                this.clipboard = null;
+                this.isPasting = false;
+                
+                this.directions = [
+                    {q: 1, r: 0}, {q: 1, r: -1}, {q: 0, r: -1},
+                    {q: -1, r: 0}, {q: -1, r: 1}, {q: 0, r: 1}
+                ];
+                
+                this.dom = {
+                    canvas: document.getElementById('hex-canvas'),
+                    ctx: document.getElementById('hex-canvas').getContext('2d'),
+                    generation: document.getElementById('hex-generation'),
+                    population: document.getElementById('hex-population'),
+                    maxPopulation: document.getElementById('hex-max-population'),
+                    maxPopGen: document.getElementById('hex-max-pop-gen'),
+                    playPauseBtn: document.getElementById('hex-play-pause'),
+                    stepBtn: document.getElementById('hex-step'),
+                    resetBtn: document.getElementById('hex-reset'),
+                    randomBtn: document.getElementById('hex-random'),
+                    drawModeBtn: document.getElementById('hex-draw-mode'),
+                    undoBtn: document.getElementById('hex-undo'),
+                    speedSlider: document.getElementById('hex-speed'),
+                    speedValue: document.getElementById('hex-speed-value'),
+                    ruleBInput: document.getElementById('hex-rule-b'),
+                    ruleSInput: document.getElementById('hex-rule-s'),
+                    rulesDisplay: document.getElementById('hex-rules-display'),
+                    contextMenu: document.getElementById('hex-contextMenu'),
+                };
+                
+                this.initialize();
+            }
+
+            initialize() {
+                this.resizeCanvas();
+                this.setupEventListeners();
+                this.updateRules();
+                this.updateStats();
+                this.startDrawingLoop();
+            }
+
+            resizeCanvas() {
+                const container = this.dom.canvas.parentElement;
+                this.dom.canvas.width = container.clientWidth;
+                this.dom.canvas.height = container.clientHeight;
+                if (this.viewport.offsetX === 0 && this.viewport.offsetY === 0) {
+                    this.viewport.offsetX = this.dom.canvas.width / 2;
+                    this.viewport.offsetY = this.dom.canvas.height / 2;
+                }
+            }
+
+            setupEventListeners() {
+                this.dom.playPauseBtn.addEventListener('click', () => this.isRunning ? this.pause() : this.play());
+                this.dom.stepBtn.addEventListener('click', () => this.step());
+                this.dom.resetBtn.addEventListener('click', () => this.reset());
+                this.dom.randomBtn.addEventListener('click', () => this.randomize());
+                this.dom.drawModeBtn.addEventListener('click', () => this.toggleDrawMode());
+                this.dom.undoBtn.addEventListener('click', () => this.undo());
+                
+                this.dom.speedSlider.addEventListener('input', (e) => {
+                    this.speed = parseInt(e.target.value);
+                    this.dom.speedValue.textContent = `${this.speed} 代/秒`;
+                    if (this.isRunning) {
+                        this.pause();
+                        this.play();
+                    }
+                });
+                
+                this.dom.ruleBInput.addEventListener('input', () => this.updateRules());
+                this.dom.ruleSInput.addEventListener('input', () => this.updateRules());
+                
+                const canvas = this.dom.canvas;
+                canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+                canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+                canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+                canvas.addEventListener('wheel', (e) => this.handleWheel(e));
+
+                canvas.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                });
+
+                this.dom.contextMenu.addEventListener('click', (e) => this.handleContextMenuClick(e));
+                document.addEventListener('click', (e) => {
+                    if (!this.dom.canvas.parentElement.contains(e.target)) {
+                        this.hideContextMenu();
+                    }
+                });
+                
+                window.addEventListener('resize', () => this.resizeCanvas());
+            }
+
+            handleMouseDown(e) {
+                this.hideContextMenu();
+                this.viewport.hasMoved = false;
+                this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+
+                if (this.isPasting && e.button === 0) {
+                    this.pasteFromClipboard(e);
+                    return;
+                }
+
+                const hexCoord = this.getHexCoordFromEvent(e);
+                const key = this.coordsToKey(hexCoord.q, hexCoord.r);
+
+                if (this.drawMode) {
+                    if (e.button === 0) {
+                        this.isDrawing = true;
+                        this.drawingCellValue = !this.grid.has(key);
+                        this.handleCellToggle(key, this.drawingCellValue);
+                    } else if (e.button === 2) {
+                        this.isSelecting = true;
+                        this.selectionRect = { startQ: hexCoord.q, startR: hexCoord.r, endQ: hexCoord.q, endR: hexCoord.r };
+                    }
+                } else {
+                    if (e.button === 0) {
+                        this.handleCellToggle(key);
+                    } else if (e.button === 2) {
+                        this.viewport.isDragging = true;
+                    }
+                }
+            }
+
+            handleMouseMove(e) {
+                if (Math.abs(e.clientX - this.viewport.lastMousePos.x) > 3 || Math.abs(e.clientY - this.viewport.lastMousePos.y) > 3) {
+                    this.viewport.hasMoved = true;
+                }
+
+                const hexCoord = this.getHexCoordFromEvent(e);
+
+                if (this.isPasting) {
+                    this.pastingPreviewPos = hexCoord;
+                    return;
+                }
+                
+                if (this.isDrawing) {
+                    const key = this.coordsToKey(hexCoord.q, hexCoord.r);
+                    this.handleCellToggle(key, this.drawingCellValue, false);
+                } else if (this.isSelecting) {
+                    this.selectionRect.endQ = hexCoord.q;
+                    this.selectionRect.endR = hexCoord.r;
+                } else if (this.viewport.isDragging) {
+                    const dx = e.clientX - this.viewport.lastMousePos.x;
+                    const dy = e.clientY - this.viewport.lastMousePos.y;
+                    this.viewport.offsetX += dx;
+                    this.viewport.offsetY += dy;
+                    this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+                }
+            }
+
+            handleMouseUp(e) {
+                if (e.button === 2) { 
+                    if (this.drawMode && this.isSelecting) {
+                        this.isSelecting = false;
+                        this.drawGrid();
+                        setTimeout(() => {
+                            this.showContextMenu(e.clientX, e.clientY);
+                        }, 10);
+                    } else if (!this.drawMode && this.viewport.isDragging) {
+                        this.viewport.isDragging = false;
+                    }
+                } else if (e.button === 0) { 
+                    if (this.isDrawing) {
+                        this.isDrawing = false;
+                    }
+                }
+            }
+            
+            handleWheel(e) {
+                 e.preventDefault();
+                const rect = this.dom.canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const scaleFactor = e.deltaY > 0 ? this.config.zoomFactor : 1 / this.config.zoomFactor;
+                const newScale = Math.max(this.config.minZoom, Math.min(this.config.maxZoom, this.viewport.scale * scaleFactor));
+                
+                if (newScale !== this.viewport.scale) {
+                    const scaleRatio = newScale / this.viewport.scale;
+                    this.viewport.offsetX = mouseX - (mouseX - this.viewport.offsetX) * scaleRatio;
+                    this.viewport.offsetY = mouseY - (mouseY - this.viewport.offsetY) * scaleRatio;
+                    this.viewport.scale = newScale;
+                }
+            }
+            
+            getHexCoordFromEvent(e) {
+                const rect = this.dom.canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const worldPos = this.screenToWorld(x, y);
+                return this.worldToHex(worldPos.x, worldPos.y);
+            }
+
+            handleCellToggle(key, value, saveHistory = true) {
+                if (saveHistory) this.saveToHistory();
+                const shouldBeAlive = value === undefined ? !this.grid.has(key) : value;
+                if (shouldBeAlive) {
+                    this.grid.set(key, true);
+                } else {
+                    this.grid.delete(key);
+                }
+                this.updateStats();
+            }
+
+            hexToWorld(q, r) {
+                const x = this.config.hexBaseSize * (3/2 * q);
+                const y = this.config.hexBaseSize * (Math.sqrt(3)/2 * q + Math.sqrt(3) * r);
+                return { x, y };
+            }
+
+            worldToHex(x, y) {
+                const q = (2/3 * x) / this.config.hexBaseSize;
+                const r = (-1/3 * x + Math.sqrt(3)/3 * y) / this.config.hexBaseSize;
+                return this.hexRound(q, r);
+            }
+
+            screenToWorld(x, y) {
+                return {
+                    x: (x - this.viewport.offsetX) / this.viewport.scale,
+                    y: (y - this.viewport.offsetY) / this.viewport.scale
+                };
+            }
+
+            hexRound(q, r) {
+                const s = -q - r;
+                let rq = Math.round(q);
+                let rr = Math.round(r);
+                let rs = Math.round(s);
+                const q_diff = Math.abs(rq - q);
+                const r_diff = Math.abs(rr - r);
+                const s_diff = Math.abs(rs - s);
+                if (q_diff > r_diff && q_diff > s_diff) {
+                    rq = -rr - rs;
+                } else if (r_diff > s_diff) {
+                    rr = -rq - rs;
+                }
+                return { q: rq, r: rr };
+            }
+
+            coordsToKey(q, r) { return `${q},${r}`; }
+            keyToCoords(key) { const [q, r] = key.split(',').map(Number); return { q, r }; }
+
+            countNeighbors(q, r) {
+                let count = 0;
+                for (const dir of this.directions) {
+                    if (this.grid.has(this.coordsToKey(q + dir.q, r + dir.r))) {
+                        count++;
+                    }
+                }
+                return count;
+            }
+
+            nextGeneration() {
+                this.saveToHistory();
+                const nextGrid = new Map();
+                const cellsToCheck = new Set();
+
+                for (const key of this.grid.keys()) {
+                    cellsToCheck.add(key);
+                    const { q, r } = this.keyToCoords(key);
+                    for (const dir of this.directions) {
+                        cellsToCheck.add(this.coordsToKey(q + dir.q, r + dir.r));
+                    }
+                }
+
+                for (const key of cellsToCheck) {
+                    const { q, r } = this.keyToCoords(key);
+                    const neighbors = this.countNeighbors(q, r);
+                    const isAlive = this.grid.has(key);
+
+                    if (!isAlive && this.ruleB.includes(neighbors)) {
+                        nextGrid.set(key, true);
+                    } else if (isAlive && this.ruleS.includes(neighbors)) {
+                        nextGrid.set(key, true);
+                    }
+                }
+                
+                this.grid = nextGrid;
+                this.generation++;
+                this.updateStats();
+            }
+
+            startDrawingLoop() {
+                const draw = () => {
+                    this.drawGrid();
+                    this.animationFrameId = requestAnimationFrame(draw);
+                };
+                draw();
+            }
+
+            drawGrid() {
+                const { ctx, canvas } = this.dom;
+                ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid-bg').trim();
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.save();
+                ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
+                ctx.scale(this.viewport.scale, this.viewport.scale);
+
+                const bounds = this.getVisibleHexBounds();
+                
+                for (let q = bounds.qMin; q <= bounds.qMax; q++) {
+                    for (let r = bounds.rMin; r <= bounds.rMax; r++) {
+                        const isAlive = this.grid.has(this.coordsToKey(q, r));
+                        this.drawHex(q, r, isAlive);
+                    }
+                }
+                
+                if (this.isSelecting || (this.selectionRect.startQ !== undefined && !this.isPasting)) {
+                    const rect = this.getNormalizedSelectionRect();
+                    for (let q = rect.q; q < rect.q + rect.w; q++) {
+                        for (let r = rect.r; r < rect.r + rect.h; r++) {
+                            this.drawHex(q, r, this.grid.has(this.coordsToKey(q,r)), true);
+                        }
+                    }
+                }
+
+                if (this.isPasting && this.clipboard && this.pastingPreviewPos) {
+                    const { pattern } = this.clipboard;
+                    const { q: startQ, r: startR } = this.pastingPreviewPos;
+                    const { minQ, minR } = this.getPatternBounds(pattern);
+                    const width = this.clipboard.width;
+                    const height = this.clipboard.height;
+
+                    for (const cell of pattern) {
+                        const q = startQ + cell.q - minQ - Math.floor(width / 2);
+                        const r = startR + cell.r - minR - Math.floor(height / 2);
+                        this.drawHex(q, r, true, false, 'rgba(231, 76, 60, 0.5)');
+                    }
+                }
+
+                ctx.restore();
+            }
+
+            drawHex(q, r, isAlive, isSelected = false, overrideColor = null) {
+                const { ctx } = this.dom;
+                const { x, y } = this.hexToWorld(q, r);
+                const size = this.config.hexBaseSize;
+                
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const angle = Math.PI / 3 * i;
+                    const hx = x + size * Math.cos(angle);
+                    const hy = y + size * Math.sin(angle);
+                    ctx[i === 0 ? 'moveTo' : 'lineTo'](hx, hy);
+                }
+                ctx.closePath();
+                
+                ctx.fillStyle = overrideColor ? overrideColor : (isAlive ? '#e74c3c' : '#343a40');
+                ctx.fill();
+                
+                if (this.viewport.scale * size > 4) {
+                    ctx.strokeStyle = isSelected ? 'rgba(0, 255, 255, 0.8)' : '#495057';
+                    ctx.lineWidth = isSelected ? 2 / this.viewport.scale : 1 / this.viewport.scale;
+                    ctx.stroke();
+                }
+            }
+
+            getVisibleHexBounds() {
+                const topLeft = this.worldToHex(this.screenToWorld(0, 0).x, this.screenToWorld(0, 0).y);
+                const topRight = this.worldToHex(this.screenToWorld(this.dom.canvas.width, 0).x, this.screenToWorld(this.dom.canvas.width, 0).y);
+                const bottomLeft = this.worldToHex(this.screenToWorld(0, this.dom.canvas.height).x, this.screenToWorld(0, this.dom.canvas.height).y);
+                const bottomRight = this.worldToHex(this.screenToWorld(this.dom.canvas.width, this.dom.canvas.height).x, this.screenToWorld(this.dom.canvas.width, this.dom.canvas.height).y);
+
+                const qMin = Math.min(topLeft.q, topRight.q, bottomLeft.q, bottomRight.q) - 1;
+                const qMax = Math.max(topLeft.q, topRight.q, bottomLeft.q, bottomRight.q) + 1;
+                const rMin = Math.min(topLeft.r, topRight.r, bottomLeft.r, bottomRight.r) - 1;
+                const rMax = Math.max(topLeft.r, topRight.r, bottomLeft.r, bottomRight.r) + 1;
+                
+                return { qMin, qMax, rMin, rMax };
+            }
+
+            play() { if (this.isRunning) return; this.isRunning = true; this.dom.playPauseBtn.textContent = '⏸️ 暂停'; this.dom.playPauseBtn.classList.replace('success', 'warning'); this.intervalId = setInterval(() => this.nextGeneration(), 1000 / this.speed); }
+            pause() { if (!this.isRunning) return; this.isRunning = false; this.dom.playPauseBtn.textContent = '▶️ 开始'; this.dom.playPauseBtn.classList.replace('warning', 'success'); clearInterval(this.intervalId); }
+            step() { this.pause(); this.nextGeneration(); }
+            reset() { this.pause(); this.grid.clear(); this.generation = 0; this.maxPopulation = 0; this.maxPopulationGeneration = 0; this.history = []; this.dom.undoBtn.disabled = true; this.updateStats(); }
+            randomize() { this.pause(); this.saveToHistory(); this.grid.clear(); const bounds = this.getVisibleHexBounds(); for (let q = bounds.qMin; q <= bounds.qMax; q++) { for (let r = bounds.rMin; r <= bounds.rMax; r++) { if (Math.random() < this.config.randomDensity) { this.grid.set(this.coordsToKey(q, r), true); } } } this.updateStats(); }
+            toggleDrawMode() { this.drawMode = !this.drawMode; this.dom.drawModeBtn.classList.toggle('warning', this.drawMode); this.dom.canvas.classList.toggle('drawing-mode', this.drawMode); }
+            saveToHistory() { if (this.history.length > 50) this.history.shift(); this.history.push(new Map(this.grid)); this.dom.undoBtn.disabled = false; }
+            undo() { if (this.history.length === 0) return; this.grid = this.history.pop(); if (this.generation > 0) this.generation--; this.updateStats(); if (this.history.length === 0) this.dom.undoBtn.disabled = true; }
+            updateRules() { const bText = this.dom.ruleBInput.value; const sText = this.dom.ruleSInput.value; this.ruleB = bText.split('').map(Number).filter(n => !isNaN(n)); this.ruleS = sText.split('').map(Number).filter(n => !isNaN(n)); this.updateRulesDisplay(); }
+            updateRulesDisplay() { this.dom.rulesDisplay.innerHTML = `<div class="rule-item"><span>🎯</span><span><b>怎么玩:</b> 点击六边形创造生命。在<b>绘图模式</b>下，左键拖拽可批量绘制，右键拖拽可框选区域进行复制、旋转等操作。</span></div><div class="rule-item"><span>❤️</span><span><b>生命存活:</b> 有 ${this.ruleS.join(', ')} 个邻居时存活</span></div><div class="rule-item"><span>🌱</span><span><b>新生命诞生:</b> 有 ${this.ruleB.join(', ')} 个邻居时诞生新生命</span></div>`; }
+            updateStats() { this.population = this.grid.size; if (this.population > this.maxPopulation) { this.maxPopulation = this.population; this.maxPopulationGeneration = this.generation; } this.dom.generation.textContent = this.generation; this.dom.population.textContent = this.population; this.dom.maxPopulation.textContent = this.maxPopulation; this.dom.maxPopGen.textContent = this.maxPopulationGeneration; }
+            
+            showContextMenu(x, y) { const menu = this.dom.contextMenu; menu.style.left = `${x - 60}px`; menu.style.top = `${y - 60}px`; menu.classList.add('show'); }
+            hideContextMenu() { this.dom.contextMenu.classList.remove('show'); }
+            
+            handleContextMenuClick(e) {
+                const action = e.target.closest('[data-action]')?.dataset.action;
+                if (!action) return;
+
+                this.hideContextMenu();
+                const { pattern, minQ, minR, width, height } = this.extractPatternFromSelection();
+                if (!pattern) return;
+
+                const rect = this.getNormalizedSelectionRect();
+
+                switch(action) {
+                    case 'copy':
+                    case 'pan':
+                        this.clipboard = { pattern, width, height };
+                        if (action === 'pan') this.clearArea(rect);
+                        this.isPasting = true;
+                        this.dom.canvas.classList.add('pasting-mode');
+                        break;
+                    case 'rotate':
+                    case 'flip-h':
+                    case 'flip-v':
+                        this.clearArea(rect);
+                        const transformed = this.transformPattern(pattern, action);
+                        this.pastePattern(transformed.pattern, rect.q, rect.r);
+                        break;
+                    case 'delete':
+                        this.clearArea(rect);
+                        break;
+                }
+                this.selectionRect = {};
+            }
+
+            getNormalizedSelectionRect() {
+                const { startQ, startR, endQ, endR } = this.selectionRect;
+                const q = Math.min(startQ, endQ);
+                const r = Math.min(startR, endR);
+                const w = Math.abs(startQ - endQ) + 1;
+                const h = Math.abs(startR - endR) + 1;
+                return { q, r, w, h };
+            }
+
+            extractPatternFromSelection() {
+                const rect = this.getNormalizedSelectionRect();
+                if (rect.w <= 0 || rect.h <= 0) return { pattern: null };
+                
+                let patternCoords = [];
+                for (let q = rect.q; q < rect.q + rect.w; q++) {
+                    for (let r = rect.r; r < rect.r + rect.h; r++) {
+                        if (this.grid.has(this.coordsToKey(q, r))) {
+                            patternCoords.push({q, r});
+                        }
+                    }
+                }
+                if (patternCoords.length === 0) return { pattern: null };
+
+                const { minQ, minR, maxQ, maxR } = this.getPatternBounds(patternCoords);
+                
+                const pattern = patternCoords.map(coord => ({q: coord.q - minQ, r: coord.r - minR}));
+                return { pattern, minQ, minR, width: maxQ - minQ + 1, height: maxR - minR + 1 };
+            }
+
+            getPatternBounds(patternCoords) {
+                let minQ = Infinity, minR = Infinity, maxQ = -Infinity, maxR = -Infinity;
+                for (const {q, r} of patternCoords) {
+                    minQ = Math.min(minQ, q);
+                    minR = Math.min(minR, r);
+                    maxQ = Math.max(maxQ, q);
+                    maxR = Math.max(maxR, r);
+                }
+                return { minQ, minR, maxQ, maxR };
+            }
+
+            clearArea(rect) {
+                this.saveToHistory();
+                for (let q = rect.q; q < rect.q + rect.w; q++) {
+                    for (let r = rect.r; r < rect.r + rect.h; r++) {
+                        this.grid.delete(this.coordsToKey(q, r));
+                    }
+                }
+            }
+
+            pastePattern(pattern, startQ, startR) {
+                this.saveToHistory();
+                for (const cell of pattern) {
+                    this.grid.set(this.coordsToKey(startQ + cell.q, startR + cell.r), true);
+                }
+            }
+            
+            pasteFromClipboard(e) {
+                if (!this.clipboard) return;
+                const { pattern, width, height } = this.clipboard;
+                const { q, r } = this.getHexCoordFromEvent(e);
+                
+                const { minQ, minR } = this.getPatternBounds(pattern);
+
+                this.pastePattern(pattern, q - minQ - Math.floor(width/2), r - minR - Math.floor(height/2));
+                
+                this.isPasting = false;
+                this.clipboard = null;
+                this.pastingPreviewPos = null;
+                this.dom.canvas.classList.remove('pasting-mode');
+            }
+
+            transformPattern(pattern, action) {
+                let newPattern = [];
+                switch (action) {
+                    case 'rotate': // 60 degrees clockwise
+                        newPattern = pattern.map(({q, r}) => {
+                            const s = -q - r;
+                            return {q: -s, r: -q};
+                        });
+                        break;
+                    case 'flip-h': // Flip across r-axis
+                        newPattern = pattern.map(({q, r}) => ({ q: -q, r: r + q }));
+                        break;
+                    case 'flip-v': // Flip across q-axis
+                         newPattern = pattern.map(({q, r}) => ({ q: q + r, r: -r }));
+                        break;
+                    default: return { pattern };
+                }
+                
+                const { minQ: newMinQ, minR: newMinR } = this.getPatternBounds(newPattern);
+                const finalPattern = newPattern.map(cell => ({q: cell.q - newMinQ, r: cell.r - newMinR}));
+                
+                return { pattern: finalPattern };
+            }
+        }
+
+        // 三角形网格生命游戏类
+        class TriangleGameOfLife {
+            constructor() {
+                this.config = {
+                    side: 40, randomDensity: 0.3, minZoom: 0.05, maxZoom: 5, zoomFactor: 0.9,
+                    gridColor: 'rgba(255, 255, 255, 0.07)', cellColor: '#00ff99', cellBorderColor: '#1a1a1a',
+                    neighborCountColor: '#ccc', neighborCountAliveColor: '#111'
+                };
+                
+                this.isRunning = false; this.generation = 0; this.population = 0; this.maxPopulation = 0; this.maxPopulationGeneration = 0; this.speed = 10;
+                this.liveCells = new Set(); this.intervalId = null; this.animationFrameId = null;
+                this.ruleB = [3]; this.ruleS = [2, 3];
+                this.viewport = { scale: 1, offsetX: 0, offsetY: 0, isDragging: false, lastMousePos: { x: 0, y: 0 }, hasMoved: false };
+                this.TRIANGLE_HEIGHT = this.config.side * Math.sqrt(3) / 2; this.TRIANGLE_WIDTH = this.config.side;
+                
+                this.drawMode = false; this.isDrawing = false; this.drawingCellValue = true; this.history = [];
+                this.isSelecting = false; this.selectionRect = {}; this.clipboard = null; this.isPasting = false;
+
+                this.dom = {
+                    canvas: document.getElementById('triangle-canvas'), ctx: document.getElementById('triangle-canvas').getContext('2d'),
+                    generation: document.getElementById('triangle-generation'), population: document.getElementById('triangle-population'), maxPopulation: document.getElementById('triangle-max-population'),
+                    maxPopGen: document.getElementById('triangle-max-pop-gen'),
+                    playPauseBtn: document.getElementById('triangle-play-pause'), stepBtn: document.getElementById('triangle-step'), resetBtn: document.getElementById('triangle-reset'),
+                    randomBtn: document.getElementById('triangle-random'), drawModeBtn: document.getElementById('triangle-draw-mode'), undoBtn: document.getElementById('triangle-undo'),
+                    speedSlider: document.getElementById('triangle-speed'), speedValue: document.getElementById('triangle-speed-value'),
+                    ruleBInput: document.getElementById('triangle-rule-b'), ruleSInput: document.getElementById('triangle-rule-s'),
+                    rulesDisplay: document.getElementById('triangle-rules-display'), contextMenu: document.getElementById('triangle-contextMenu')
+                };
+                
+                this.initialize();
+            }
+
+            initialize() {
+                this.resizeCanvas();
+                this.setupEventListeners();
+                this.updateRules();
+                this.updateStats();
+                this.startDrawingLoop();
+            }
+
+            resizeCanvas() {
+                const container = this.dom.canvas.parentElement;
+                this.dom.canvas.width = container.clientWidth;
+                this.dom.canvas.height = container.clientHeight;
+                if (this.viewport.offsetX === 0 && this.viewport.offsetY === 0) {
+                    this.viewport.offsetX = this.dom.canvas.width / 2;
+                    this.viewport.offsetY = this.dom.canvas.height / 2;
+                }
+            }
+
+            setupEventListeners() {
+                this.dom.playPauseBtn.addEventListener('click', () => this.isRunning ? this.pause() : this.play());
+                this.dom.stepBtn.addEventListener('click', () => this.step());
+                this.dom.resetBtn.addEventListener('click', () => this.reset());
+                this.dom.randomBtn.addEventListener('click', () => this.randomize());
+                this.dom.drawModeBtn.addEventListener('click', () => this.toggleDrawMode());
+                this.dom.undoBtn.addEventListener('click', () => this.undo());
+                
+                this.dom.speedSlider.addEventListener('input', (e) => { this.speed = parseInt(e.target.value); this.dom.speedValue.textContent = `${this.speed} 代/秒`; if (this.isRunning) { this.pause(); this.play(); } });
+                this.dom.ruleBInput.addEventListener('input', () => this.updateRules());
+                this.dom.ruleSInput.addEventListener('input', () => this.updateRules());
+                
+                const canvas = this.dom.canvas;
+                canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+                canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+                canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+                canvas.addEventListener('wheel', (e) => this.handleWheel(e));
+                
+                canvas.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                });
+
+                this.dom.contextMenu.addEventListener('click', (e) => this.handleContextMenuClick(e));
+                document.addEventListener('click', (e) => { if (!this.dom.canvas.parentElement.contains(e.target)) { this.hideContextMenu(); } });
+                
+                window.addEventListener('resize', () => this.resizeCanvas());
+            }
+
+            handleMouseDown(e) {
+                this.hideContextMenu();
+                this.viewport.hasMoved = false;
+                this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+
+                if (this.isPasting && e.button === 0) {
+                    this.pasteFromClipboard(e);
+                    return;
+                }
+
+                const gridPos = this.getGridCoordFromEvent(e);
+                const key = `${gridPos.c},${gridPos.r}`;
+
+                if (this.drawMode) {
+                    if (e.button === 0) {
+                        this.isDrawing = true;
+                        this.drawingCellValue = !this.liveCells.has(key);
+                        this.handleCellToggle(key, this.drawingCellValue);
+                    } else if (e.button === 2) {
+                        this.isSelecting = true;
+                        this.selectionRect = { startC: gridPos.c, startR: gridPos.r, endC: gridPos.c, endR: gridPos.r };
+                    }
+                } else {
+                    if (e.button === 0) {
+                        this.handleCellToggle(key);
+                    } else if (e.button === 2) {
+                        this.viewport.isDragging = true;
+                    }
+                }
+            }
+
+            handleMouseMove(e) {
+                if (Math.abs(e.clientX - this.viewport.lastMousePos.x) > 3 || Math.abs(e.clientY - this.viewport.lastMousePos.y) > 3) {
+                    this.viewport.hasMoved = true;
+                }
+
+                const gridPos = this.getGridCoordFromEvent(e);
+
+                if (this.isPasting) {
+                    this.pastingPreviewPos = gridPos;
+                    return;
+                }
+
+                if (this.isDrawing) {
+                    const key = `${gridPos.c},${gridPos.r}`;
+                    this.handleCellToggle(key, this.drawingCellValue, false);
+                } else if (this.isSelecting) {
+                    this.selectionRect.endC = gridPos.c;
+                    this.selectionRect.endR = gridPos.r;
+                } else if (this.viewport.isDragging) {
+                    const dx = e.clientX - this.viewport.lastMousePos.x;
+                    const dy = e.clientY - this.viewport.lastMousePos.y;
+                    this.viewport.offsetX += dx;
+                    this.viewport.offsetY += dy;
+                    this.viewport.lastMousePos = { x: e.clientX, y: e.clientY };
+                }
+            }
+            
+            handleMouseUp(e) {
+                if (e.button === 2) { 
+                    if (this.drawMode && this.isSelecting) {
+                        this.isSelecting = false;
+                        this.drawGrid();
+                        setTimeout(() => {
+                            this.showContextMenu(e.clientX, e.clientY);
+                        }, 10);
+                    } else if (!this.drawMode && this.viewport.isDragging) {
+                        this.viewport.isDragging = false;
+                    }
+                } else if (e.button === 0) {
+                    if (this.isDrawing) {
+                        this.isDrawing = false;
+                    }
+                }
+            }
+
+            handleWheel(e) {
+                e.preventDefault();
+                const rect = this.dom.canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const scaleFactor = e.deltaY > 0 ? this.config.zoomFactor : 1 / this.config.zoomFactor;
+                const newScale = this.viewport.scale * scaleFactor;
+                
+                if (newScale !== this.viewport.scale) {
+                    const scaleRatio = newScale / this.viewport.scale;
+                    this.viewport.offsetX = mouseX - (mouseX - this.viewport.offsetX) * scaleRatio;
+                    this.viewport.offsetY = mouseY - (mouseY - this.viewport.offsetY) * scaleRatio;
+                    this.viewport.scale = Math.max(this.config.minZoom, Math.min(this.config.maxZoom, newScale));
+                }
+            }
+
+            getGridCoordFromEvent(e) {
+                const rect = this.dom.canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const worldPos = this.screenToWorld(x, y);
+                return this.worldToGrid(worldPos.x, worldPos.y);
+            }
+
+            handleCellToggle(key, value, saveHistory = true) {
+                if (saveHistory) this.saveToHistory();
+                const shouldBeAlive = value === undefined ? !this.liveCells.has(key) : value;
+                if (shouldBeAlive) {
+                    this.liveCells.add(key);
+                } else {
+                    this.liveCells.delete(key);
+                }
+                this.updateStats();
+            }
+
+            screenToWorld(x, y) { return { x: (x - this.viewport.offsetX) / this.viewport.scale, y: (y - this.viewport.offsetY) / this.viewport.scale }; }
+            
+            worldToGrid(worldX, worldY) {
+                const r = Math.floor(worldY / this.TRIANGLE_HEIGHT);
+                const c_candidate = Math.floor(worldX / (this.TRIANGLE_WIDTH / 2));
+                const relY = (worldY / this.TRIANGLE_HEIGHT) - r;
+                const relX = (worldX / (this.TRIANGLE_WIDTH / 2)) - c_candidate;
+                const isPointingDown = (c_candidate + r) % 2 === 0;
+
+                if (isPointingDown) {
+                    if (relY > relX) {
+                        return { c: c_candidate - 1, r: r };
+                    }
+                } else { 
+                    if (relY < (1 - relX)) {
+                        return { c: c_candidate - 1, r: r };
+                    }
+                }
+                
+                return { c: c_candidate, r: r };
+            }
+
+            getVisibleWorldBounds() { const topLeft = this.screenToWorld(0, 0); const bottomRight = this.screenToWorld(this.dom.canvas.width, this.dom.canvas.height); return { left: Math.floor(topLeft.x / this.TRIANGLE_WIDTH * 2), right: Math.ceil(bottomRight.x / this.TRIANGLE_WIDTH * 2), top: Math.floor(topLeft.y / this.TRIANGLE_HEIGHT), bottom: Math.ceil(bottomRight.y / this.TRIANGLE_HEIGHT) }; }
+
+            getNeighborOffsets(c, r) { const isPointingUp = (c + r) % 2 !== 0; let edge, vertex; if (isPointingUp) { edge = [ [-1, 0], [1, 0], [0, 1] ]; vertex = [ [0, -1], [-1, -1], [1, -1], [-2, 0], [2, 0], [-1, 1], [-2, 1], [1, 1], [2, 1] ]; } else { edge = [ [-1, 0], [1, 0], [0, -1] ]; vertex = [ [-2, 0], [2, 0], [-1, -1], [-2, -1], [1, -1], [2, -1], [0, 1], [-1, 1], [1, 1] ]; } return { edge, vertex }; }
+            getCellsWithNeighborDetails() { const neighborDetails = new Map(); const ensureCell = (key) => { if (!neighborDetails.has(key)) { neighborDetails.set(key, { edge: 0, vertex: 0 }); } }; for (const cellKey of this.liveCells) { ensureCell(cellKey); const [c, r] = cellKey.split(',').map(Number); const { edge: edgeOffsets, vertex: vertexOffsets } = this.getNeighborOffsets(c, r); for (const offset of edgeOffsets) { const neighborKey = `${c + offset[0]},${r + offset[1]}`; ensureCell(neighborKey); neighborDetails.get(neighborKey).edge++; } for (const offset of vertexOffsets) { const neighborKey = `${c + offset[0]},${r + offset[1]}`; ensureCell(neighborKey); neighborDetails.get(neighborKey).vertex++; } } return neighborDetails; }
+            nextGeneration() { this.saveToHistory(); const nextLiveCells = new Set(); const cellsToCheck = this.getCellsWithNeighborDetails(); for (const [cellKey, details] of cellsToCheck.entries()) { const totalNeighbors = details.edge + details.vertex; const isAlive = this.liveCells.has(cellKey); if (!isAlive && this.ruleB.includes(totalNeighbors)) { nextLiveCells.add(cellKey); } else if (isAlive && this.ruleS.includes(totalNeighbors)) { nextLiveCells.add(cellKey); } } this.liveCells = nextLiveCells; this.generation++; this.updateStats(); }
+
+            startDrawingLoop() { const draw = () => { this.drawGrid(); this.animationFrameId = requestAnimationFrame(draw); }; draw(); }
+            drawGrid() {
+                const { ctx, canvas } = this.dom;
+                ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid-bg').trim();
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.save();
+                ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
+                ctx.scale(this.viewport.scale, this.viewport.scale);
+
+                this.drawGridLines();
+                this.drawLiveCells();
+                this.drawNeighborCounts();
+                
+                if (this.isSelecting || (this.selectionRect.startC !== undefined && !this.isPasting)) {
+                    const rect = this.getNormalizedSelectionRect();
+                    for (let r = rect.r; r < rect.r + rect.h; r++) {
+                        for (let c = rect.c; c < rect.c + rect.w; c++) {
+                            this.drawTriangle(c, r, true);
+                        }
+                    }
+                }
+                if (this.isPasting && this.clipboard && this.pastingPreviewPos) {
+                    const { pattern } = this.clipboard;
+                    const { c: startC, r: startR } = this.pastingPreviewPos;
+                    const { minC, minR } = this.getPatternBounds(pattern);
+                    for (const cell of pattern) {
+                        const c = startC + cell.c - minC - Math.floor((this.clipboard.width -1) / 2);
+                        const r = startR + cell.r - minR - Math.floor((this.clipboard.height -1) / 2);
+                        this.drawTriangle(c, r, false, 'rgba(0, 255, 153, 0.5)');
+                    }
+                }
+
+                ctx.restore();
+            }
+            drawGridLines() { if (this.viewport.scale < 0.2) return; const { left, right, top, bottom } = this.getVisibleWorldBounds(); const { ctx } = this.dom; ctx.strokeStyle = this.config.gridColor; ctx.lineWidth = 1 / this.viewport.scale; ctx.beginPath(); for (let r = top - 1; r <= bottom + 1; r++) { for (let c = left - 2; c <= right + 2; c++) { this.drawTrianglePath(c, r); } } ctx.stroke(); }
+            drawLiveCells() { const { ctx } = this.dom; ctx.fillStyle = this.config.cellColor; ctx.strokeStyle = this.config.cellBorderColor; ctx.lineWidth = 2.5 / this.viewport.scale; ctx.beginPath(); for (const cellKey of this.liveCells) { const [c, r] = cellKey.split(',').map(Number); this.drawTrianglePath(c, r); } ctx.fill(); if (this.viewport.scale > 0.3) { ctx.stroke(); } }
+            drawNeighborCounts() { if (this.viewport.scale < 0.5) return; const cellsToLabel = this.getCellsWithNeighborDetails(); const { ctx } = this.dom; ctx.font = `${this.config.side / 2.8}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; for (const [cellKey, details] of cellsToLabel.entries()) { const totalNeighbors = details.edge + details.vertex; if (totalNeighbors === 0) continue; const [c, r] = cellKey.split(',').map(Number); const isAlive = this.liveCells.has(cellKey); const isPointingUp = (c + r) % 2 !== 0; const worldX = c * this.TRIANGLE_WIDTH / 2 + this.TRIANGLE_WIDTH / 2; const worldY = r * this.TRIANGLE_HEIGHT + this.TRIANGLE_HEIGHT * (isPointingUp ? 2/3 : 1/3); ctx.fillStyle = isAlive ? this.config.neighborCountAliveColor : this.config.neighborCountColor; const label = `${details.edge}+${details.vertex}`; ctx.fillText(label, worldX, worldY); } }
+            
+            drawTrianglePath(c, r) {
+                const { ctx } = this.dom;
+                const worldX = c * this.TRIANGLE_WIDTH / 2;
+                const worldY = r * this.TRIANGLE_HEIGHT;
+                const isPointingDown = (c + r) % 2 === 0;
+                
+                let p1, p2, p3;
+
+                if (isPointingDown) {
+                    p1 = { x: worldX, y: worldY };
+                    p2 = { x: worldX + this.TRIANGLE_WIDTH, y: worldY };
+                    p3 = { x: worldX + this.TRIANGLE_WIDTH / 2, y: worldY + this.TRIANGLE_HEIGHT };
+                } else {
+                    p1 = { x: worldX + this.TRIANGLE_WIDTH / 2, y: worldY };
+                    p2 = { x: worldX, y: worldY + this.TRIANGLE_HEIGHT };
+                    p3 = { x: worldX + this.TRIANGLE_WIDTH, y: worldY + this.TRIANGLE_HEIGHT };
+                }
+
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.lineTo(p3.x, p3.y);
+                ctx.closePath();
+            }
+
+            drawTriangle(c, r, isSelected = false, overrideColor = null) {
+                const { ctx } = this.dom;
+                ctx.beginPath();
+                this.drawTrianglePath(c, r);
+                if (overrideColor) { ctx.fillStyle = overrideColor; ctx.fill(); }
+                if (isSelected) { ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; ctx.lineWidth = 2 / this.viewport.scale; ctx.stroke(); }
+            }
+
+            play() { if (this.isRunning) return; this.isRunning = true; this.dom.playPauseBtn.textContent = '⏸️ 暂停'; this.dom.playPauseBtn.classList.replace('success', 'warning'); this.intervalId = setInterval(() => this.nextGeneration(), 1000 / this.speed); }
+            pause() { if (!this.isRunning) return; this.isRunning = false; this.dom.playPauseBtn.textContent = '▶️ 开始'; this.dom.playPauseBtn.classList.replace('warning', 'success'); clearInterval(this.intervalId); }
+            step() { this.pause(); this.nextGeneration(); }
+            reset() { this.pause(); this.liveCells.clear(); this.generation = 0; this.maxPopulation = 0; this.maxPopulationGeneration = 0; this.history = []; this.dom.undoBtn.disabled = true; this.updateStats(); }
+            randomize() { this.pause(); this.saveToHistory(); this.liveCells.clear(); const bounds = this.getVisibleWorldBounds(); for (let r = Math.floor(bounds.top); r <= Math.ceil(bounds.bottom); r++) { for (let c = Math.floor(bounds.left); c <= Math.ceil(bounds.right); c++) { if (Math.random() < this.config.randomDensity) this.liveCells.add(`${c},${r}`); } } this.updateStats(); }
+            toggleDrawMode() { this.drawMode = !this.drawMode; this.dom.drawModeBtn.classList.toggle('warning', this.drawMode); this.dom.canvas.classList.toggle('drawing-mode', this.drawMode); }
+            saveToHistory() { if (this.history.length > 50) this.history.shift(); this.history.push(new Set(this.liveCells)); this.dom.undoBtn.disabled = false; }
+            undo() { if (this.history.length === 0) return; this.liveCells = this.history.pop(); if (this.generation > 0) this.generation--; this.updateStats(); if (this.history.length === 0) this.dom.undoBtn.disabled = true; }
+            updateRules() { const bText = this.dom.ruleBInput.value; const sText = this.dom.ruleSInput.value; this.ruleB = bText.split('').map(Number).filter(n => !isNaN(n)); this.ruleS = sText.split('').map(Number).filter(n => !isNaN(n)); this.updateRulesDisplay(); }
+            updateRulesDisplay() { this.dom.rulesDisplay.innerHTML = `<div class="rule-item"><span>🎯</span><span><b>怎么玩:</b> 点击三角形创造生命。在<b>绘图模式</b>下，左键拖拽可批量绘制，右键拖拽可框选区域进行复制、旋转等操作。</span></div><div class="rule-item"><span>❤️</span><span><b>生命存活:</b> 有 ${this.ruleS.join(', ')} 个邻居时存活</span></div><div class="rule-item"><span>🌱</span><span><b>新生命诞生:</b> 有 ${this.ruleB.join(', ')} 个邻居时诞生新生命</span></div><div class="rule-item"><span>🔺</span><span><b>特殊机制:</b> 三角形有边邻居和顶点邻居两种类型</span></div>`;}
+            updateStats() { this.population = this.liveCells.size; if (this.population > this.maxPopulation) { this.maxPopulation = this.population; this.maxPopulationGeneration = this.generation; } this.dom.generation.textContent = this.generation; this.dom.population.textContent = this.population; this.dom.maxPopulation.textContent = this.maxPopulation; this.dom.maxPopGen.textContent = this.maxPopulationGeneration; }
+
+            showContextMenu(x, y) { const menu = this.dom.contextMenu; menu.style.left = `${x - 60}px`; menu.style.top = `${y - 60}px`; menu.classList.add('show'); }
+            hideContextMenu() { this.dom.contextMenu.classList.remove('show'); }
+            
+            handleContextMenuClick(e) {
+                const action = e.target.closest('[data-action]')?.dataset.action;
+                if (!action) return;
+                this.hideContextMenu();
+                const { pattern, width, height } = this.extractPatternFromSelection();
+                if (!pattern) return;
+                const rect = this.getNormalizedSelectionRect();
+                switch(action) {
+                    case 'copy': case 'pan':
+                        this.clipboard = { pattern, width, height };
+                        if (action === 'pan') this.clearArea(rect);
+                        this.isPasting = true; this.dom.canvas.classList.add('pasting-mode');
+                        break;
+                    case 'rotate': case 'flip-h': case 'flip-v':
+                        this.clearArea(rect);
+                        const transformed = this.transformPattern(pattern, action, rect);
+                        this.pastePattern(transformed, { c: rect.c, r: rect.r });
+                        break;
+                    case 'delete': this.clearArea(rect); break;
+                }
+                this.selectionRect = {};
+            }
+
+            getNormalizedSelectionRect() { const { startC, startR, endC, endR } = this.selectionRect; const c = Math.min(startC, endC); const r = Math.min(startR, endR); const w = Math.abs(startC - endC) + 1; const h = Math.abs(startR - endR) + 1; return { c, r, w, h }; }
+            extractPatternFromSelection() {
+                const rect = this.getNormalizedSelectionRect();
+                if (rect.w <= 0 || rect.h <= 0) return { pattern: null };
+                let patternCoords = [];
+                for (let r = rect.r; r < rect.r + rect.h; r++) {
+                    for (let c = rect.c; c < rect.c + rect.w; c++) {
+                        if (this.liveCells.has(`${c},${r}`)) patternCoords.push({c, r});
+                    }
+                }
+                if (patternCoords.length === 0) return { pattern: null };
+                const { maxC, minC, maxR, minR } = this.getPatternBounds(patternCoords);
+                return { pattern: patternCoords, width: maxC - minC + 1, height: maxR - minR + 1 };
+            }
+            getPatternBounds(patternCoords) { let minC = Infinity, minR = Infinity, maxC = -Infinity, maxR = -Infinity; for (const {c, r} of patternCoords) { minC = Math.min(minC, c); minR = Math.min(minR, r); maxC = Math.max(maxC, c); maxR = Math.max(maxR, r); } return { minC, minR, maxC, maxR }; }
+            clearArea(rect) { this.saveToHistory(); for (let r = rect.r; r < rect.r + rect.h; r++) { for (let c = rect.c; c < rect.c + rect.w; c++) { this.liveCells.delete(`${c},${r}`); } } }
+            pastePattern(pattern, startPos) {
+                this.saveToHistory();
+                const { minC, minR } = this.getPatternBounds(pattern);
+                for (const cell of pattern) {
+                    this.liveCells.add(`${startPos.c + cell.c - minC},${startPos.r + cell.r - minR}`);
+                }
+            }
+            pasteFromClipboard(e) {
+                if (!this.clipboard) return;
+                const { pattern, width, height } = this.clipboard;
+                const gridPos = this.getGridCoordFromEvent(e);
+                const { minC, minR } = this.getPatternBounds(pattern);
+                const startPos = {
+                    c: gridPos.c - (minC - this.getPatternBounds(pattern).minC) - Math.floor((width - 1) / 2),
+                    r: gridPos.r - (minR - this.getPatternBounds(pattern).minR) - Math.floor((height - 1) / 2)
+                };
+                this.pastePattern(pattern, startPos);
+                this.isPasting = false; this.clipboard = null; this.pastingPreviewPos = null; this.dom.canvas.classList.remove('pasting-mode');
+            }
+            transformPattern(pattern, action, rect) {
+                const centerC = rect.c + (rect.w - 1) / 2;
+                const centerR = rect.r + (rect.h - 1) / 2;
+                return pattern.map(({c, r}) => {
+                    switch (action) {
+                        case 'rotate': return { c: Math.round(centerC * 2 - c), r: Math.round(centerR * 2 - r) };
+                        case 'flip-h': return { c: Math.round(centerC * 2 - c), r: r };
+                        case 'flip-v': return { c: c, r: Math.round(centerR * 2 - r) };
+                        default: return {c, r};
+                    }
+                });
+            }
+        }
+
+        // 初始化游戏管理器
+        document.addEventListener('DOMContentLoaded', () => {
+            new GameManager();
+        });
+    </script>
+</body>
+</html>
