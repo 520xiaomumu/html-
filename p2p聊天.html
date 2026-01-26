@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus P2P - 完整增强版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { corePlugins: { preflight: false } }</script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #888; border-radius: 3px; }
+        .video-container { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+        .video-small { position: absolute; top: 10px; right: 10px; width: 150px; height: 112px; border: 2px solid white; border-radius: 8px; z-index: 10; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const generateId = () => Math.random().toString(36).substring(2, 10);
+        const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+        function App() {
+            const [contacts, setContacts] = useState([]);
+            const [activeContactId, setActiveContactId] = useState(null);
+            const [messages, setMessages] = useState({});
+            const [inputMessage, setInputMessage] = useState('');
+            const [showAddDialog, setShowAddDialog] = useState(false);
+            const [joinCode, setJoinCode] = useState('');
+            const [myCode, setMyCode] = useState('');
+            const [username, setUsername] = useState('');
+            const [showRenameDialog, setShowRenameDialog] = useState(false);
+            const [newUsername, setNewUsername] = useState('');
+            
+            // 音视频状态
+            const [callState, setCallState] = useState({});
+            const [localStream, setLocalStream] = useState(null);
+            const [remoteStreams, setRemoteStreams] = useState({});
+            
+            // 语音录制状态
+            const [isRecording, setIsRecording] = useState(false);
+            const [recordingContactId, setRecordingContactId] = useState(null);
+            
+            const peersRef = useRef({});
+            const channelsRef = useRef({});
+            const mqttClientsRef = useRef({});
+            const mediaRecorderRef = useRef(null);
+            const audioChunksRef = useRef([]);
+            const localVideoRef = useRef(null);
+            const remoteVideoRefs = useRef({});
+            const fileChunksRef = useRef({});
+
+            useEffect(() => {
+                loadFromStorage();
+            }, []);
+
+            const loadFromStorage = async () => {
+                try {
+                    const [contactsRes, messagesRes, userRes] = await Promise.all([
+                        window.storage.get('contacts').catch(() => null),
+                        window.storage.get('messages').catch(() => null),
+                        window.storage.get('username').catch(() => null)
+                    ]);
+
+                    if (contactsRes?.value) {
+                        const savedContacts = JSON.parse(contactsRes.value);
+                        setContacts(savedContacts);
+                        savedContacts.forEach(contact => {
+                            if (contact.token) reconnectContact(contact);
+                        });
+                    }
+                    if (messagesRes?.value) setMessages(JSON.parse(messagesRes.value));
+                    if (userRes?.value) setUsername(userRes.value);
+                    else setUsername(`User_${generateId().substring(0, 4)}`);
+                } catch (e) {
+                    console.error('加载数据失败', e);
+                    setUsername(`User_${generateId().substring(0, 4)}`);
+                }
+            };
+
+            const saveToStorage = async (key, value) => {
+                try {
+                    await window.storage.set(key, JSON.stringify(value));
+                } catch (e) {
+                    console.error('保存失败', e);
+                }
+            };
+
+            const createConnection = async () => {
+                const code = generateCode();
+                const token = generateId();
+                const contactId = generateId();
+                
+                setMyCode(code);
+                
+                const newContact = {
+                    id: contactId,
+                    name: `等待加入 (${code})`,
+                    token,
+                    code,
+                    status: 'waiting',
+                    isHost: true,
+                    lastSeen: Date.now()
+                };
+
+                setContacts(prev => {
+                    const updated = [...prev, newContact];
+                    saveToStorage('contacts', updated);
+                    return updated;
+                });
+
+                initPeerConnection(contactId, token, true, code);
+            };
+
+            const joinConnection = async () => {
+                if (joinCode.length !== 6) return;
+                
+                const token = generateId();
+                const contactId = generateId();
+                
+                const newContact = {
+                    id: contactId,
+                    name: `连接中 (${joinCode})`,
+                    token,
+                    code: joinCode,
+                    status: 'connecting',
+                    isHost: false,
+                    lastSeen: Date.now()
+                };
+
+                setContacts(prev => {
+                    const updated = [...prev, newContact];
+                    saveToStorage('contacts', updated);
+                    return updated;
+                });
+
+                initPeerConnection(contactId, token, false, joinCode);
+                setShowAddDialog(false);
+                setJoinCode('');
+            };
+
+            const reconnectContact = (contact) => {
+                if (!contact.token) return;
+                updateContactStatus(contact.id, 'reconnecting');
+                initPeerConnection(contact.id, contact.token, contact.isHost, contact.code);
+            };
+
+            const initPeerConnection = (contactId, token, isHost, code) => {
+                const pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                });
+
+                peersRef.current[contactId] = pc;
+
+                const mqttTopic = isHost ? `nexus/${code}/offer` : `nexus/${code}/answer`;
+                const subscribeTopic = isHost ? `nexus/${code}/answer` : `nexus/${code}/offer`;
+                
+                const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+                    clientId: `nexus-${generateId()}`
+                });
+                mqttClientsRef.current[contactId] = client;
+
+                client.on('connect', async () => {
+                    client.subscribe(subscribeTopic);
+                    
+                    if (isHost) {
+                        const channel = pc.createDataChannel('nexus');
+                        setupDataChannel(contactId, channel);
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                    } else {
+                        pc.ondatachannel = e => setupDataChannel(contactId, e.channel);
+                    }
+                });
+
+                client.on('message', async (topic, msg) => {
+                    try {
+                        const data = JSON.parse(msg.toString());
+                        if (data.type === 'signal') {
+                            const desc = JSON.parse(data.sdp);
+                            await pc.setRemoteDescription(desc);
+                            if (desc.type === 'offer') {
+                                const answer = await pc.createAnswer();
+                                await pc.setLocalDescription(answer);
+                            }
+                        }
+                    } catch (e) {}
+                });
+
+                pc.onicecandidate = e => {
+                    if (e.candidate === null && pc.localDescription) {
+                        const payload = {
+                            type: 'signal',
+                            sdp: JSON.stringify(pc.localDescription)
+                        };
+                        client.publish(mqttTopic, JSON.stringify(payload), { retain: true });
+                    }
+                };
+
+                pc.ontrack = e => {
+                    setRemoteStreams(prev => ({
+                        ...prev,
+                        [contactId]: e.streams[0]
+                    }));
+                };
+
+                pc.onconnectionstatechange = () => {
+                    const state = pc.connectionState;
+                    updateContactStatus(contactId, state);
+                    
+                    if (state === 'connected') {
+                        setTimeout(() => {
+                            client.publish(mqttTopic, '', { retain: true });
+                            client.end();
+                            delete mqttClientsRef.current[contactId];
+                        }, 1000);
+                    } else if (['disconnected', 'failed'].includes(state)) {
+                        setCallState(prev => ({ ...prev, [contactId]: null }));
+                        setTimeout(() => {
+                            const contact = contacts.find(c => c.id === contactId);
+                            if (contact) reconnectContact(contact);
+                        }, 3000);
+                    }
+                };
+            };
+
+            const setupDataChannel = (contactId, channel) => {
+                channelsRef.current[contactId] = channel;
+                
+                channel.onopen = () => {
+                    updateContactStatus(contactId, 'connected');
+                    sendToContact(contactId, {
+                        type: 'handshake',
+                        username,
+                        timestamp: Date.now()
+                    });
+                };
+
+                channel.onmessage = e => {
+                    try {
+                        if (typeof e.data === 'string') {
+                            const data = JSON.parse(e.data);
+                            handleIncomingMessage(contactId, data);
+                        } else {
+                            handleIncomingBinaryData(contactId, e.data);
+                        }
+                    } catch (err) {
+                        console.error('消息处理错误', err);
+                    }
+                };
+
+                channel.onclose = () => {
+                    updateContactStatus(contactId, 'disconnected');
+                };
+            };
+
+            const handleIncomingMessage = (contactId, data) => {
+                if (data.type === 'handshake') {
+                    setContacts(prev => {
+                        const updated = prev.map(c => 
+                            c.id === contactId 
+                                ? { ...c, name: data.username, lastSeen: Date.now() }
+                                : c
+                        );
+                        saveToStorage('contacts', updated);
+                        return updated;
+                    });
+                } else if (data.type === 'message') {
+                    addMessage(contactId, {
+                        id: data.id,
+                        text: data.text,
+                        sender: 'them',
+                        timestamp: data.timestamp
+                    });
+                } else if (data.type === 'rename') {
+                    setContacts(prev => {
+                        const updated = prev.map(c => 
+                            c.id === contactId 
+                                ? { ...c, name: data.username }
+                                : c
+                        );
+                        saveToStorage('contacts', updated);
+                        return updated;
+                    });
+                } else if (data.type === 'file-start') {
+                    fileChunksRef.current[data.fileId] = {
+                        chunks: [],
+                        metadata: data
+                    };
+                } else if (data.type === 'file-chunk') {
+                    // 处理文件块
+                } else if (data.type === 'file-end') {
+                    const fileData = fileChunksRef.current[data.fileId];
+                    if (fileData) {
+                        const blob = new Blob(fileData.chunks);
+                        const url = URL.createObjectURL(blob);
+                        addMessage(contactId, {
+                            id: generateId(),
+                            type: fileData.metadata.fileType,
+                            fileName: fileData.metadata.fileName,
+                            fileUrl: url,
+                            fileSize: fileData.metadata.fileSize,
+                            sender: 'them',
+                            timestamp: Date.now()
+                        });
+                        delete fileChunksRef.current[data.fileId];
+                    }
+                } else if (data.type === 'call-request') {
+                    setCallState(prev => ({
+                        ...prev,
+                        [contactId]: { type: data.callType, status: 'incoming' }
+                    }));
+                } else if (data.type === 'call-accepted') {
+                    setCallState(prev => ({
+                        ...prev,
+                        [contactId]: { ...prev[contactId], status: 'active' }
+                    }));
+                } else if (data.type === 'call-rejected') {
+                    setCallState(prev => ({ ...prev, [contactId]: null }));
+                    if (localStream) {
+                        localStream.getTracks().forEach(track => track.stop());
+                        setLocalStream(null);
+                    }
+                }
+            };
+
+            const handleIncomingBinaryData = (contactId, arrayBuffer) => {
+                const fileId = `file-${Date.now()}`;
+                if (!fileChunksRef.current[fileId]) {
+                    fileChunksRef.current[fileId] = { chunks: [] };
+                }
+                fileChunksRef.current[fileId].chunks.push(arrayBuffer);
+            };
+
+            const sendToContact = (contactId, data) => {
+                const channel = channelsRef.current[contactId];
+                if (channel?.readyState === 'open') {
+                    channel.send(JSON.stringify(data));
+                }
+            };
+
+            const sendMessage = () => {
+                if (!inputMessage.trim() || !activeContactId) return;
+
+                const msg = {
+                    id: generateId(),
+                    text: inputMessage,
+                    sender: 'me',
+                    timestamp: Date.now()
+                };
+
+                addMessage(activeContactId, msg);
+                sendToContact(activeContactId, {
+                    type: 'message',
+                    id: msg.id,
+                    text: msg.text,
+                    timestamp: msg.timestamp
+                });
+
+                setInputMessage('');
+            };
+
+            const sendFile = async (contactId, file) => {
+                const fileId = generateId();
+                const fileType = file.type.startsWith('image/') ? 'image' : 
+                               file.type.startsWith('video/') ? 'video' : 'file';
+                
+                sendToContact(contactId, {
+                    type: 'file-start',
+                    fileId,
+                    fileName: file.name,
+                    fileSize: file.size,
+                    fileType: file.type
+                });
+
+                const chunkSize = 16384;
+                const reader = new FileReader();
+                let offset = 0;
+
+                const readNextChunk = () => {
+                    const slice = file.slice(offset, offset + chunkSize);
+                    reader.readAsArrayBuffer(slice);
+                };
+
+                reader.onload = e => {
+                    const channel = channelsRef.current[contactId];
+                    if (channel?.readyState === 'open') {
+                        channel.send(e.target.result);
+                        offset += e.target.result.byteLength;
+                        
+                        if (offset < file.size) {
+                            readNextChunk();
+                        } else {
+                            sendToContact(contactId, {
+                                type: 'file-end',
+                                fileId
+                            });
+                        }
+                    }
+                };
+
+                readNextChunk();
+
+                const url = URL.createObjectURL(file);
+                addMessage(contactId, {
+                    id: generateId(),
+                    type: fileType,
+                    fileName: file.name,
+                    fileUrl: url,
+                    fileSize: file.size,
+                    sender: 'me',
+                    timestamp: Date.now()
+                });
+            };
+
+            const startVoiceRecording = async (contactId) => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    const mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorderRef.current = mediaRecorder;
+                    audioChunksRef.current = [];
+
+                    mediaRecorder.ondataavailable = e => {
+                        audioChunksRef.current.push(e.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                        const url = URL.createObjectURL(audioBlob);
+                        
+                        addMessage(contactId, {
+                            id: generateId(),
+                            type: 'audio',
+                            fileUrl: url,
+                            sender: 'me',
+                            timestamp: Date.now()
+                        });
+
+                        // 发送音频文件
+                        sendFile(contactId, new File([audioBlob], 'voice.webm', { type: 'audio/webm' }));
+                        
+                        stream.getTracks().forEach(track => track.stop());
+                    };
+
+                    mediaRecorder.start();
+                    setIsRecording(true);
+                    setRecordingContactId(contactId);
+                } catch (err) {
+                    alert('无法访问麦克风：' + err.message);
+                }
+            };
+
+            const stopVoiceRecording = () => {
+                if (mediaRecorderRef.current) {
+                    mediaRecorderRef.current.stop();
+                    setIsRecording(false);
+                    setRecordingContactId(null);
+                }
+            };
+
+            const startCall = async (contactId, callType) => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: true,
+                        video: callType === 'video'
+                    });
+
+                    setLocalStream(stream);
+                    const pc = peersRef.current[contactId];
+                    
+                    stream.getTracks().forEach(track => {
+                        pc.addTrack(track, stream);
+                    });
+
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+
+                    const mqttTopic = contacts.find(c => c.id === contactId)?.isHost 
+                        ? `nexus/${contacts.find(c => c.id === contactId).code}/offer`
+                        : `nexus/${contacts.find(c => c.id === contactId).code}/answer`;
+                    
+                    const client = mqttClientsRef.current[contactId];
+                    if (client) {
+                        client.publish(mqttTopic, JSON.stringify({
+                            type: 'signal',
+                            sdp: JSON.stringify(pc.localDescription)
+                        }), { retain: true });
+                    }
+
+                    sendToContact(contactId, {
+                        type: 'call-request',
+                        callType
+                    });
+
+                    setCallState(prev => ({
+                        ...prev,
+                        [contactId]: { type: callType, status: 'calling' }
+                    }));
+                } catch (err) {
+                    alert('无法访问摄像头/麦克风：' + err.message);
+                }
+            };
+
+            const acceptCall = async (contactId) => {
+                const callInfo = callState[contactId];
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: true,
+                        video: callInfo.type === 'video'
+                    });
+
+                    setLocalStream(stream);
+                    const pc = peersRef.current[contactId];
+                    
+                    stream.getTracks().forEach(track => {
+                        pc.addTrack(track, stream);
+                    });
+
+                    sendToContact(contactId, {
+                        type: 'call-accepted'
+                    });
+
+                    setCallState(prev => ({
+                        ...prev,
+                        [contactId]: { ...prev[contactId], status: 'active' }
+                    }));
+                } catch (err) {
+                    alert('无法访问摄像头/麦克风：' + err.message);
+                }
+            };
+
+            const rejectCall = (contactId) => {
+                sendToContact(contactId, {
+                    type: 'call-rejected'
+                });
+                setCallState(prev => ({ ...prev, [contactId]: null }));
+            };
+
+            const endCall = (contactId) => {
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    setLocalStream(null);
+                }
+                setCallState(prev => ({ ...prev, [contactId]: null }));
+                sendToContact(contactId, {
+                    type: 'call-rejected'
+                });
+            };
+
+            const renameUser = () => {
+                if (!newUsername.trim()) return;
+                
+                setUsername(newUsername);
+                saveToStorage('username', newUsername);
+                
+                contacts.forEach(contact => {
+                    if (contact.status === 'connected') {
+                        sendToContact(contact.id, {
+                            type: 'rename',
+                            username: newUsername
+                        });
+                    }
+                });
+                
+                setShowRenameDialog(false);
+                setNewUsername('');
+            };
+
+            const addMessage = (contactId, msg) => {
+                setMessages(prev => {
+                    const updated = {
+                        ...prev,
+                        [contactId]: [...(prev[contactId] || []), msg]
+                    };
+                    saveToStorage('messages', updated);
+                    return updated;
+                });
+            };
+
+            const updateContactStatus = (contactId, status) => {
+                setContacts(prev => {
+                    const updated = prev.map(c => 
+                        c.id === contactId 
+                            ? { ...c, status, lastSeen: Date.now() }
+                            : c
+                    );
+                    saveToStorage('contacts', updated);
+                    return updated;
+                });
+            };
+
+            const deleteContact = (contactId) => {
+                if (!confirm('确定删除此联系人？')) return;
+                
+                peersRef.current[contactId]?.close();
+                channelsRef.current[contactId]?.close();
+                mqttClientsRef.current[contactId]?.end();
+                
+                delete peersRef.current[contactId];
+                delete channelsRef.current[contactId];
+                delete mqttClientsRef.current[contactId];
+
+                setContacts(prev => {
+                    const updated = prev.filter(c => c.id !== contactId);
+                    saveToStorage('contacts', updated);
+                    return updated;
+                });
+
+                setMessages(prev => {
+                    const updated = { ...prev };
+                    delete updated[contactId];
+                    saveToStorage('messages', updated);
+                    return updated;
+                });
+
+                if (activeContactId === contactId) {
+                    setActiveContactId(null);
+                }
+            };
+
+            const handleFileSelect = (e) => {
+                const file = e.target.files[0];
+                if (file && activeContactId) {
+                    sendFile(activeContactId, file);
+                }
+            };
+
+            const activeContact = contacts.find(c => c.id === activeContactId);
+            const activeMessages = messages[activeContactId] || [];
+            const activeCallState = callState[activeContactId];
+            const remoteStream = remoteStreams[activeContactId];
+
+            useEffect(() => {
+                if (localStream && localVideoRef.current) {
+                    localVideoRef.current.srcObject = localStream;
+                }
+            }, [localStream]);
+
+            useEffect(() => {
+                if (remoteStream && activeContactId && remoteVideoRefs.current[activeContactId]) {
+                    remoteVideoRefs.current[activeContactId].srcObject = remoteStream;
+                }
+            }, [remoteStream, activeContactId]);
+
+            const getStatusColor = (status) => {
+                switch (status) {
+                    case 'connected': return 'bg-green-500';
+                    case 'connecting':
+                    case 'reconnecting': return 'bg-yellow-500';
+                    case 'waiting': return 'bg-blue-500';
+                    default: return 'bg-gray-400';
+                }
+            };
+
+            const getStatusText = (status) => {
+                switch (status) {
+                    case 'connected': return '在线';
+                    case 'connecting': return '连接中';
+                    case 'reconnecting': return '重连中';
+                    case 'waiting': return '等待';
+                    default: return '离线';
+                }
+            };
+
+            const formatFileSize = (bytes) => {
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            };
+
+            return (
+                <div className="h-screen flex">
+                    <div className="w-80 bg-white border-r flex flex-col">
+                        <div className="p-4 border-b bg-blue-600 text-white">
+                            <h1 className="text-xl font-bold">Nexus P2P</h1>
+                            <p className="text-xs opacity-80 mt-1">端到端加密通信</p>
+                        </div>
+
+                        <div className="p-3 border-b space-y-2">
+                            <button
+                                onClick={createConnection}
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium"
+                            >
+                                + 创建新会话
+                            </button>
+                            <button
+                                onClick={() => setShowAddDialog(true)}
+                                className="w-full bg-white hover:bg-gray-50 border border-gray-300 py-2 rounded-lg text-sm font-medium"
+                            >
+                                加入会话
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto">
+                            {contacts.length === 0 ? (
+                                <div className="p-8 text-center text-gray-400 text-sm">
+                                    <p>暂无联系人</p>
+                                    <p className="text-xs mt-2">创建或加入会话开始聊天</p>
+                                </div>
+                            ) : (
+                                contacts.map(contact => (
+                                    <div
+                                        key={contact.id}
+                                        onClick={() => setActiveContactId(contact.id)}
+                                        className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition ${activeContactId === contact.id ? 'bg-blue-50 border-l-4 border-l-blue-600' : ''}`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                <div className={`w-2 h-2 rounded-full ${getStatusColor(contact.status)}`} />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-medium truncate">{contact.name}</div>
+                                                    <div className="text-xs text-gray-500">{getStatusText(contact.status)}</div>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    deleteContact(contact.id);
+                                                }}
+                                                className="text-gray-400 hover:text-red-600 text-xs"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        {contact.status === 'waiting' && contact.code && (
+                                            <div className="mt-2 text-xs bg-blue-100 text-blue-700 p-2 rounded">
+                                                分享代码: <span className="font-bold">{contact.code}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <div className="p-3 border-t bg-gray-50">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs text-gray-600">
+                                    我是 <span className="font-medium">{username}</span>
+                                </span>
+                                <button
+                                    onClick={() => {
+                                        setNewUsername(username);
+                                        setShowRenameDialog(true);
+                                    }}
+                                    className="text-xs text-blue-600 hover:text-blue-700"
+                                >
+                                    重命名
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col bg-gray-50">
+                        {activeContact ? (
+                            <>
+                                <div className="p-4 bg-white border-b">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h2 className="font-bold">{activeContact.name}</h2>
+                                            <p className="text-xs text-gray-500">{getStatusText(activeContact.status)}</p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {activeContact.status === 'connected' && !activeCallState && (
+                                                <>
+                                                    <button
+                                                        onClick={() => startCall(activeContactId, 'audio')}
+                                                        className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                                                    >
+                                                        📞 语音
+                                                    </button>
+                                                    <button
+                                                        onClick={() => startCall(activeContactId, 'video')}
+                                                        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                                                    >
+                                                        📹 视频
+                                                    </button>
+                                                </>
+                                            )}
+                                            {activeCallState && (
+                                                <button
+                                                    onClick={() => endCall(activeContactId)}
+                                                    className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                                                >
+                                                    挂断
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {activeCallState && activeCallState.status === 'incoming' && (
+                                    <div className="p-4 bg-yellow-50 border-b flex items-center justify-between">
+                                        <span className="text-sm">
+                                            {activeCallState.type === 'video' ? '视频' : '语音'}通话请求...
+                                        </span>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => acceptCall(activeContactId)}
+                                                className="px-4 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                                            >
+                                                接听
+                                            </button>
+                                            <button
+                                                onClick={() => rejectCall(activeContactId)}
+                                                className="px-4 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                                            >
+                                                拒绝
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeCallState && ['calling', 'active'].includes(activeCallState.status) && activeCallState.type === 'video' && (
+                                    <div className="p-4 bg-black">
+                                        <div className="video-container" style={{height: '400px'}}>
+                                            <video
+                                                ref={el => remoteVideoRefs.current[activeContactId] = el}
+                                                autoPlay
+                                                playsInline
+                                                className="w-full h-full object-cover"
+                                            />
+                                            {localStream && (
+                                                <video
+                                                    ref={localVideoRef}
+                                                    autoPlay
+                                                    playsInline
+                                                    muted
+                                                    className="video-small object-cover"
+                                                />
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                                    {activeMessages.map(msg => (
+                                        <div key={msg.id} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
+                                            <div className={`max-w-md ${msg.sender === 'me' ? 'items-end' : 'items-start'} flex flex-col`}>
+                                                {msg.type === 'image' && (
+                                                    <div className={`rounded-2xl overflow-hidden ${msg.sender === 'me' ? 'rounded-br-sm' : 'rounded-bl-sm'}`}>
+                                                        <img src={msg.fileUrl} alt={msg.fileName} className="max-w-xs" />
+                                                    </div>
+                                                )}
+                                                {msg.type === 'video' && (
+                                                    <div className={`rounded-2xl overflow-hidden ${msg.sender === 'me' ? 'rounded-br-sm' : 'rounded-bl-sm'}`}>
+                                                        <video src={msg.fileUrl} controls className="max-w-xs" />
+                                                    </div>
+                                                )}
+                                                {msg.type === 'audio' && (
+                                                    <div className={`px-4 py-2 rounded-2xl ${msg.sender === 'me' ? 'bg-blue-600 rounded-br-sm' : 'bg-white border rounded-bl-sm'}`}>
+                                                        <audio src={msg.fileUrl} controls className="w-full" />
+                                                    </div>
+                                                )}
+                                                {msg.type === 'file' && (
+                                                    <a
+                                                        href={msg.fileUrl}
+                                                        download={msg.fileName}
+                                                        className={`px-4 py-2 rounded-2xl ${msg.sender === 'me' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm'}`}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <span>📎</span>
+                                                            <div>
+                                                                <div className="text-sm font-medium">{msg.fileName}</div>
+                                                                <div className="text-xs opacity-70">{formatFileSize(msg.fileSize)}</div>
+                                                            </div>
+                                                        </div>
+                                                    </a>
+                                                )}
+                                                {!msg.type && (
+                                                    <div className={`px-4 py-2 rounded-2xl ${msg.sender === 'me' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm'}`}>
+                                                        <p className="text-sm">{msg.text}</p>
+                                                    </div>
+                                                )}
+                                                <p className={`text-xs mt-1 px-2 ${msg.sender === 'me' ? 'text-gray-500' : 'text-gray-400'}`}>
+                                                    {new Date(msg.timestamp).toLocaleTimeString()}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="p-4 bg-white border-t">
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="file"
+                                            id="file-input"
+                                            onChange={handleFileSelect}
+                                            className="hidden"
+                                        />
+                                        <label
+                                            htmlFor="file-input"
+                                            className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-full cursor-pointer"
+                                        >
+                                            📎
+                                        </label>
+                                        
+                                        {isRecording && recordingContactId === activeContactId ? (
+                                            <button
+                                                onClick={stopVoiceRecording}
+                                                className="px-3 py-2 bg-red-600 text-white rounded-full hover:bg-red-700 animate-pulse"
+                                            >
+                                                ⏹️ 停止
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={() => startVoiceRecording(activeContactId)}
+                                                disabled={activeContact.status !== 'connected'}
+                                                className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-full disabled:bg-gray-50"
+                                            >
+                                                🎤
+                                            </button>
+                                        )}
+                                        
+                                        <input
+                                            type="text"
+                                            value={inputMessage}
+                                            onChange={e => setInputMessage(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                                            placeholder={activeContact.status === 'connected' ? '输入消息...' : '等待连接...'}
+                                            disabled={activeContact.status !== 'connected'}
+                                            className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:bg-gray-100"
+                                        />
+                                        <button
+                                            onClick={sendMessage}
+                                            disabled={activeContact.status !== 'connected' || !inputMessage.trim()}
+                                            className="bg-blue-600 text-white px-6 py-2 rounded-full hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                                        >
+                                            发送
+                                        </button>
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="flex-1 flex items-center justify-center text-gray-400">
+                                <div className="text-center">
+                                    <p className="text-lg">选择一个联系人开始聊天</p>
+                                    <p className="text-sm mt-2">或创建新会话</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {showAddDialog && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-lg p-6 w-96">
+                                <h3 className="text-lg font-bold mb-4">加入会话</h3>
+                                <p className="text-sm text-gray-600 mb-3">输入对方分享的6位代码</p>
+                                <input
+                                    type="text"
+                                    value={joinCode}
+                                    onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                    placeholder="000000"
+                                    className="w-full border rounded-lg px-4 py-3 text-center text-2xl font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-600"
+                                />
+                                <div className="flex gap-2 mt-4">
+                                    <button
+                                        onClick={() => {
+                                            setShowAddDialog(false);
+                                            setJoinCode('');
+                                        }}
+                                        className="flex-1 py-2 border rounded-lg hover:bg-gray-50"
+                                    >
+                                        取消
+                                    </button>
+                                    <button
+                                        onClick={joinConnection}
+                                        disabled={joinCode.length !== 6}
+                                        className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
+                                    >
+                                        加入
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {myCode && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-lg p-6 w-96">
+                                <h3 className="text-lg font-bold mb-4">分享此代码</h3>
+                                <p className="text-sm text-gray-600 mb-3">将此代码告诉对方,等待加入</p>
+                                <div className="text-5xl font-bold text-center text-blue-600 tracking-widest my-6 select-all">
+                                    {myCode}
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(myCode);
+                                        alert('已复制到剪贴板');
+                                    }}
+                                    className="w-full py-2 bg-gray-100 rounded-lg hover:bg-gray-200 mb-2"
+                                >
+                                    复制代码
+                                </button>
+                                <button
+                                    onClick={() => setMyCode('')}
+                                    className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                >
+                                    完成
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {showRenameDialog && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-lg p-6 w-96">
+                                <h3 className="text-lg font-bold mb-4">重命名</h3>
+                                <input
+                                    type="text"
+                                    value={newUsername}
+                                    onChange={e => setNewUsername(e.target.value)}
+                                    placeholder="输入新名称"
+                                    className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                                />
+                                <div className="flex gap-2 mt-4">
+                                    <button
+                                        onClick={() => {
+                                            setShowRenameDialog(false);
+                                            setNewUsername('');
+                                        }}
+                                        className="flex-1 py-2 border rounded-lg hover:bg-gray-50"
+                                    >
+                                        取消
+                                    </button>
+                                    <button
+                                        onClick={renameUser}
+                                        disabled={!newUsername.trim()}
+                                        className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
+                                    >
+                                        确认
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

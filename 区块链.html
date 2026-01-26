@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus P2P - 无服务器直连节点</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 修复：引入 React 和 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        body { font-family: 'JetBrains Mono', monospace; background-color: #0d1117; color: #3fb950; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #238636; border-radius: 3px; }
+        .terminal-box {
+            background: rgba(13, 17, 23, 0.95);
+            border: 1px solid #30363d;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .code-block {
+            word-break: break-all;
+            font-size: 10px;
+            line-height: 1.1;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // 确保 React 对象存在
+        const { useState, useEffect, useRef } = React;
+
+        // --- 模拟的区块链工具函数 ---
+        const generateHash = async (content, prevHash) => {
+            const msg = `${prevHash}${JSON.stringify(content)}${Date.now()}`;
+            let hash = 0;
+            for (let i = 0; i < msg.length; i++) {
+                hash = ((hash << 5) - hash) + msg.charCodeAt(i);
+                hash |= 0;
+            }
+            return "0x" + Math.abs(hash).toString(16).padStart(40, '0');
+        };
+
+        function App() {
+            // --- 状态管理 ---
+            const [mode, setMode] = useState('idle'); // idle, creating, joining, connected
+            const [localOffer, setLocalOffer] = useState('');
+            const [remoteAnswer, setRemoteAnswer] = useState('');
+            const [connectionStatus, setConnectionStatus] = useState('未连接');
+            const [logs, setLogs] = useState(['系统就绪...等待指令']);
+            const [message, setMessage] = useState('');
+            const [chain, setChain] = useState([]);
+            
+            // WebRTC 核心引用
+            const peerRef = useRef(null);
+            const dataChannelRef = useRef(null);
+
+            // --- 日志辅助 ---
+            const addLog = (msg) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
+
+            // --- 辅助函数：复制到剪贴板 (兼容 iframe) ---
+            const copyToClipboard = (text) => {
+                if (!text) return;
+                try {
+                    // 尝试使用传统的 execCommand 方法，因为它在 iframe 中通常更稳定
+                    const textArea = document.createElement("textarea");
+                    textArea.value = text;
+                    
+                    // 避免页面滚动或闪烁
+                    textArea.style.position = "fixed";
+                    textArea.style.left = "-9999px";
+                    textArea.style.top = "0";
+                    
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    
+                    const successful = document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    
+                    if (successful) {
+                        addLog("已复制到剪贴板！");
+                    } else {
+                        addLog("自动复制失败，请手动选中文本复制。");
+                    }
+                } catch (err) {
+                    addLog("复制出错: " + err.message);
+                    console.error("Copy failed", err);
+                }
+            };
+
+            // --- 1. 初始化 WebRTC ---
+            const initPeer = () => {
+                const pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // 使用公开的 STUN 服务器获取公网 IP
+                });
+
+                pc.onicecandidate = (event) => {
+                    if (event.candidate === null) {
+                        // 候选人收集完毕，生成最终暗号
+                        addLog("网络地址收集完毕，生成连接暗号...");
+                        setLocalOffer(JSON.stringify(pc.localDescription));
+                    }
+                };
+
+                pc.onconnectionstatechange = () => {
+                    setConnectionStatus(pc.connectionState);
+                    addLog(`连接状态变更: ${pc.connectionState}`);
+                    if (pc.connectionState === 'connected') {
+                        setMode('connected');
+                    }
+                };
+
+                return pc;
+            };
+
+            // --- 2. 创建房间 (Host) ---
+            const createRoom = async () => {
+                setMode('creating');
+                addLog("正在初始化 P2P 主机...");
+                const pc = initPeer();
+                peerRef.current = pc;
+
+                // 主机创建数据通道
+                const channel = pc.createDataChannel("nexus-chain");
+                setupDataChannel(channel);
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+            };
+
+            // --- 3. 加入房间 (Guest) ---
+            const joinRoom = async () => {
+                setMode('joining');
+                addLog("准备加入 P2P 网络...");
+                const pc = initPeer();
+                peerRef.current = pc;
+
+                // 客人监听数据通道
+                pc.ondatachannel = (event) => {
+                    addLog("检测到数据通道，正在挂载...");
+                    setupDataChannel(event.channel);
+                };
+            };
+
+            // --- 4. 配置数据通道 (通用) ---
+            const setupDataChannel = (channel) => {
+                dataChannelRef.current = channel;
+                channel.onopen = () => addLog(">>> 数据通道已打开！加密直连建立成功 <<<");
+                channel.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'BLOCK') {
+                        addLog(`接收到新区块: ${data.hash.substring(0,8)}...`);
+                        setChain(prev => [data, ...prev]);
+                    }
+                };
+            };
+
+            // --- 5. 握手逻辑：处理对方的 SDP ---
+            const handleOfferPaste = async () => {
+                if (!remoteAnswer) return;
+                const pc = peerRef.current;
+                try {
+                    const desc = JSON.parse(remoteAnswer);
+                    await pc.setRemoteDescription(desc);
+                    
+                    if (desc.type === 'offer') {
+                        // 如果我是客人，对方给我 Offer，我得生成 Answer
+                        const answer = await pc.createAnswer();
+                        await pc.setLocalDescription(answer);
+                        // 本地的 answer 会通过 onicecandidate 最终生成在 localOffer 状态里
+                    }
+                } catch (e) {
+                    addLog("暗号解析错误，请确保复制完整: " + e.message);
+                }
+            };
+
+            // --- 6. 广播/发送数据 ---
+            const broadcastBlock = async () => {
+                if (!message) return;
+                const prevHash = chain.length > 0 ? chain[0].hash : "GENESIS";
+                const hash = await generateHash(message, prevHash);
+                
+                const newBlock = {
+                    type: 'BLOCK',
+                    hash,
+                    content: message,
+                    timestamp: Date.now(),
+                    author: 'LocalUser'
+                };
+
+                // 1. 本地显示
+                setChain(prev => [newBlock, ...prev]);
+                
+                // 2. P2P 发送
+                if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+                    dataChannelRef.current.send(JSON.stringify(newBlock));
+                    addLog("区块已广播给对等节点");
+                } else {
+                    addLog("警告：没有连接对等节点，区块仅保存在本地");
+                }
+                
+                setMessage('');
+            };
+
+            // --- UI 组件 ---
+            return (
+                <div className="min-h-screen p-4 md:p-8 max-w-5xl mx-auto flex flex-col md:flex-row gap-6">
+                    
+                    {/* 左侧：控制台 & 连接面板 */}
+                    <div className="w-full md:w-1/3 flex flex-col gap-4">
+                        <div className="terminal-box p-4 rounded-lg">
+                            <h1 className="text-xl font-bold mb-2 flex items-center gap-2">
+                                <div className={`w-3 h-3 rounded-full ${connectionStatus === 'connected' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                                Nexus P2P
+                            </h1>
+                            <p className="text-xs text-gray-400 mb-4">WebRTC 无服务器直连协议</p>
+                            
+                            {/* 状态选择 */}
+                            {mode === 'idle' && (
+                                <div className="flex gap-2">
+                                    <button onClick={createRoom} className="flex-1 bg-green-900/30 border border-green-700 text-green-400 py-2 rounded hover:bg-green-800/50 text-xs">
+                                        创建连接 (我是主机)
+                                    </button>
+                                    <button onClick={joinRoom} className="flex-1 bg-blue-900/30 border border-blue-700 text-blue-400 py-2 rounded hover:bg-blue-800/50 text-xs">
+                                        加入连接 (我是客人)
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* 握手流程 UI */}
+                            {(mode === 'creating' || mode === 'joining') && (
+                                <div className="space-y-4 animate-in fade-in">
+                                    <div className="p-2 bg-black/50 rounded border border-gray-700">
+                                        <p className="text-[10px] text-gray-400 mb-1">第一步：复制此暗号发给对方</p>
+                                        <div className="relative">
+                                            <textarea 
+                                                readOnly 
+                                                value={localOffer || "正在生成握手暗号(等待网络收集)..."} 
+                                                className="w-full bg-black text-gray-500 p-2 text-[10px] h-16 resize-none outline-none"
+                                            />
+                                            <button 
+                                                onClick={() => copyToClipboard(localOffer)}
+                                                className="absolute bottom-1 right-1 bg-gray-700 text-white text-[10px] px-2 py-0.5 rounded"
+                                            >
+                                                复制
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="p-2 bg-black/50 rounded border border-gray-700">
+                                        <p className="text-[10px] text-gray-400 mb-1">第二步：在此粘贴对方发来的回执</p>
+                                        <textarea 
+                                            value={remoteAnswer} 
+                                            onChange={e => setRemoteAnswer(e.target.value)}
+                                            placeholder="粘贴对方的暗号..." 
+                                            className="w-full bg-black text-green-400 p-2 text-[10px] h-16 resize-none outline-none border border-gray-800 focus:border-green-500"
+                                        />
+                                    </div>
+
+                                    <button 
+                                        onClick={handleOfferPaste}
+                                        className="w-full bg-green-600 text-black font-bold py-2 rounded hover:bg-green-500 transition"
+                                    >
+                                        确认连接
+                                    </button>
+                                </div>
+                            )}
+
+                             {/* 连接成功提示 */}
+                             {mode === 'connected' && (
+                                <div className="bg-green-900/20 border border-green-500/50 p-4 rounded text-center">
+                                    <h3 className="text-green-400 font-bold text-lg">加密隧道已打通</h3>
+                                    <p className="text-xs text-green-600 mt-1">数据正在两台设备间直接传输</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 系统日志 */}
+                        <div className="terminal-box p-3 rounded-lg flex-1 overflow-hidden flex flex-col min-h-[200px]">
+                            <div className="text-xs text-gray-500 mb-2 font-bold border-b border-gray-800 pb-1">系统日志</div>
+                            <div className="flex-1 overflow-y-auto space-y-1 font-mono text-[10px] text-gray-400">
+                                {logs.map((log, i) => <div key={i}>{log}</div>)}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 右侧：区块链数据流 */}
+                    <div className="w-full md:w-2/3 flex flex-col gap-4">
+                        {/* 输入框 */}
+                        <div className="terminal-box p-4 rounded-lg">
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    value={message}
+                                    onChange={e => setMessage(e.target.value)}
+                                    disabled={mode !== 'connected' && mode !== 'idle'} // 本地测试也可以发
+                                    placeholder={mode === 'connected' ? "在此输入信息，将直接推送到对方屏幕..." : "连接后可发送消息..."}
+                                    className="flex-1 bg-black border border-gray-700 rounded px-4 py-2 text-sm focus:outline-none focus:border-green-500 transition text-green-300 placeholder-gray-700"
+                                    onKeyDown={e => e.key === 'Enter' && broadcastBlock()}
+                                />
+                                <button 
+                                    onClick={broadcastBlock}
+                                    className="bg-green-700 text-black px-6 py-2 rounded font-bold hover:bg-green-600 transition"
+                                >
+                                    上链
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 链显示区 */}
+                        <div className="flex-1 overflow-y-auto space-y-4 pr-2 max-h-[70vh]">
+                            {chain.length === 0 && (
+                                <div className="text-center text-gray-600 mt-20">
+                                    <p>暂无区块数据</p>
+                                    <p className="text-xs">请先建立连接或在本地发布</p>
+                                </div>
+                            )}
+                            {chain.map((block, index) => (
+                                <div key={index} className="terminal-box p-4 rounded border-l-4 border-l-green-600 animate-in slide-in-from-bottom-2">
+                                    <div className="flex justify-between text-[10px] text-gray-500 mb-2 font-mono">
+                                        <span>HASH: {block.hash.substring(0, 20)}...</span>
+                                        <span>{new Date(block.timestamp).toLocaleTimeString()}</span>
+                                    </div>
+                                    <div className="text-lg text-green-100 font-bold">{block.content}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
