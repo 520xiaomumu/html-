@@ -1,0 +1,3088 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 狼人杀剧场</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: { zinc: { 850: '#1f1f22', 950: '#09090b' } },
+                    animation: { 'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite' }
+                }
+            }
+        };
+    </script>
+
+    <!-- React & Libraries -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.3); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.5); }
+
+        .typing-dot { animation: typing 1.4s infinite ease-in-out both; }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+        .fade-enter { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+
+        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 100; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+        .toast { pointer-events: auto; padding: 10px 16px; border-radius: 8px; color: white; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: fadeIn 0.3s ease; max-width: 300px; }
+        .toast.error { background-color: #ef4444; }
+        .toast.success { background-color: #22c55e; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- Defaults ---
+        const DEFAULT_MODEL_CONFIGS = [
+            { id: 'config-1', name: 'DeepSeek API', provider: 'openai', baseUrl: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-chat' },
+            { id: 'config-2', name: 'Google Gemini', provider: 'google', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '', model: 'gemini-1.5-flash' }
+        ];
+
+        const DEFAULT_SYSTEM_PROMPTS = [
+            { id: 'prompt-1', name: '理中客助手', content: '你是一个理智、客观、有逻辑的助手。你的回答通常比较正式，喜欢列出一二三点。你不会轻易发火。' },
+            { id: 'prompt-2', name: '暴躁老哥', content: '你是一个脾气暴躁、说话直接、喜欢吐槽和抬杠的网友。你看不惯别人装模作样，喜欢用讽刺的语气。你经常使用“笑死”、“得了吧”等口语。' },
+            { id: 'prompt-3', name: '吃瓜群众', content: '你是一个典型的“吃瓜群众”，性格随和，有点迷糊。你喜欢发颜文字，经常说些有的没的，或者在气氛紧张时打圆场。你不擅长解决复杂问题，但擅长活跃气氛。' }
+        ];
+
+        const DEFAULT_AGENTS = [
+            { id: 'agent-1', name: '理中客', avatarColor: 'bg-blue-500', configId: 'config-1', promptId: 'prompt-1', enabled: true },
+            { id: 'agent-2', name: '暴躁老哥', avatarColor: 'bg-red-500', configId: 'config-1', promptId: 'prompt-2', enabled: true },
+            { id: 'agent-3', name: '路人甲', avatarColor: 'bg-green-500', configId: 'config-1', promptId: 'prompt-3', enabled: true }
+        ];
+
+        const DEFAULT_DIRECTOR_RULE = `你是一个群聊导演。请根据上下文决定下一位发言者。
+    可选演员:
+    {agent_descriptions}
+
+    规则:
+    1. 返回JSON: {"next_speaker_id": "ID", "reason": "理由"}
+    2. 若无需发言返回 null ID。
+    3. 尽量让对话自然有趣。
+    4. 如果用户询问，请指派最合适的角色回答。`;
+
+        const DEFAULT_WEREWOLF_ROLE_PROMPTS = {
+            wolf: '你是狼人。你的目标是隐瞒身份并带领狼队获胜。发言时要有逻辑但避免暴露。',
+            villager: '你是村民。你的目标是通过讨论与投票找出狼人。发言要结合事实与逻辑。',
+            seer: '你是预言家。你可以在第一夜查验一名玩家的身份。白天发言可引导但避免暴露过早。',
+            witch: '你是女巫。你有一瓶解药和一瓶毒药。你需要判断是否救人或毒人。',
+            hunter: '你是猎人。你死亡时可以带走一名玩家。请在被淘汰时果断选择目标。',
+            guard: '你是守卫。每晚可以守护一名玩家，但不能连续守护同一人。',
+            idiot: '你是白痴。被投票出局可翻牌免死，但失去投票权。'
+        };
+
+        // --- Icons ---
+        const Icon = ({ path, className, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{path}</svg>
+        );
+        const Icons = {
+            Plus: (p) => <Icon path={<><path d="M5 12h14"/><path d="M12 5v14"/></>} {...p} />,
+            Trash: (p) => <Icon path={<><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>} {...p} />,
+            X: (p) => <Icon path={<><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>} {...p} />,
+            Settings: (p) => <Icon path={<><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></>} {...p} />,
+            Send: (p) => <Icon path={<><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></>} {...p} />,
+            User: (p) => <Icon path={<><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>} {...p} />,
+            Moon: (p) => <Icon path={<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>} {...p} />,
+            Sun: (p) => <Icon path={<><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></>} {...p} />,
+            Play: (p) => <Icon path={<polygon points="5 3 19 12 5 21 5 3"/>} {...p} />,
+            Pause: (p) => <Icon path={<><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></>} {...p} />,
+            Users: (p) => <Icon path={<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>} {...p} />,
+            Brain: (p) => <Icon path={<path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/>} {...p} />,
+            Edit: (p) => <Icon path={<><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>} {...p} />,
+            CheckCircle: (p) => <Icon path={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>} {...p} />,
+            Activity: (p) => <Icon path={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>} {...p} />,
+            Loader: (p) => <Icon path={<path d="M21 12a9 9 0 1 1-6.219-8.56"/>} className={`animate-spin ${p.className}`} {...p} />,
+            Save: (p) => <Icon path={<><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></>} {...p} />,
+            Database: (p) => <Icon path={<><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></>} {...p} />,
+            Zap: (p) => <Icon path={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>} {...p} />,
+            FileText: (p) => <Icon path={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></>} {...p} />,
+            Clapperboard: (p) => <Icon path={<><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></>} {...p} />,
+            Download: (p) => <Icon path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>} {...p} />,
+            Copy: (p) => <Icon path={<><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>} {...p} />,
+            AtSign: (p) => <Icon path={<><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 1-3 3H7a5 5 0 1 1 4.5-8"/></>} {...p} />,
+            Wolf: (p) => <Icon path={<><path d="M12 2c-2 0-3.5 1-4 2.5-.5-.5-1.5-1-3-1 0 2 1 3 2 3.5-1 1-1.5 2.5-1.5 4.5 0 4 3 7.5 6.5 7.5s6.5-3.5 6.5-7.5c0-2-.5-3.5-1.5-4.5 1-.5 2-1.5 2-3.5-1.5 0-2.5.5-3 1-.5-1.5-2-2.5-4-2.5z"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/></>} {...p} />,
+            Shield: (p) => <Icon path={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>} {...p} />,
+            Eye: (p) => <Icon path={<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>} {...p} />,
+            Skull: (p) => <Icon path={<><circle cx="12" cy="10" r="8"/><path d="M12 18v4"/><path d="M8 22h8"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><path d="M9 14h6"/></>} {...p} />,
+            Target: (p) => <Icon path={<><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></>} {...p} />,
+        };
+
+        const cn = (...classes) => classes.filter(Boolean).join(' ');
+
+        const safeParse = (raw, fallback) => {
+            if (!raw) return fallback;
+            try {
+                const parsed = JSON.parse(raw);
+                return parsed ?? fallback;
+            } catch (e) {
+                return fallback;
+            }
+        };
+
+        // --- UI Components ---
+        const Toast = ({ toasts, removeToast }) => (
+            <div className="toast-container">
+                {toasts.map(t => (
+                    <div key={t.id} className={`toast ${t.type === 'error' ? 'error' : 'success'}`} onClick={() => removeToast(t.id)}>
+                        {t.msg}
+                    </div>
+                ))}
+            </div>
+        );
+
+        // --- Logic ---
+        const callLLM = async (messages, config, onUpdate, onComplete, onError) => {
+            if (!config || !config.apiKey) {
+                onError("配置无效：缺少 API Key");
+                return;
+            }
+
+            const baseUrl = (config.baseUrl || 'https://api.deepseek.com').replace(/\/+$/, '');
+            let url, body, headers;
+
+            try {
+                if (config.provider === 'google') {
+                    const model = config.model || 'gemini-1.5-flash';
+                    url = `${baseUrl}/v1beta/models/${model}:streamGenerateContent?key=${config.apiKey}&alt=sse`;
+                    headers = { 'Content-Type': 'application/json' };
+                    body = JSON.stringify({
+                        contents: messages.map(m => ({
+                            role: m.role === 'user' ? 'user' : 'model',
+                            parts: [{ text: m.content }]
+                        }))
+                    });
+                } else {
+                    url = `${baseUrl}/chat/completions`;
+                    headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` };
+                    body = JSON.stringify({
+                        model: config.model || 'deepseek-chat',
+                        messages: messages,
+                        stream: true
+                    });
+                }
+
+                let response = await fetch(url, { method: 'POST', headers, body });
+                if (response.status === 404 && config.provider !== 'google' && !url.includes('/v1/')) {
+                    const v1Url = `${baseUrl}/v1/chat/completions`;
+                    const resV1 = await fetch(v1Url, { method: 'POST', headers, body });
+                    if (resV1.status !== 404) response = resV1;
+                }
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errText.substring(0,100)}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (config.provider === 'google') {
+                            if (trimmed.startsWith('data: ')) {
+                                try {
+                                    const json = JSON.parse(trimmed.substring(6));
+                                    const content = json.candidates?.[0]?.content?.parts?.[0]?.text;
+                                    if (content) onUpdate(content);
+                                } catch (e) {}
+                            }
+                        } else {
+                            if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
+                                try {
+                                    const json = JSON.parse(trimmed.substring(6));
+                                    const content = json.choices?.[0]?.delta?.content;
+                                    if (content) onUpdate(content);
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                }
+                onComplete();
+            } catch (e) {
+                onError(e.message);
+            }
+        };
+
+        const callGoogle = async (apiKey, baseUrl, model, text) => {
+            const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text }] }] })
+            });
+            if (!res.ok) throw new Error(`Google API Error: ${res.status}`);
+            const data = await res.json();
+            return data.candidates?.[0]?.content?.parts?.[0]?.text;
+        };
+
+        const callOpenAI = async (apiKey, baseUrl, model, text) => {
+            let cleanBase = (baseUrl || '').replace(/\/+$/, '');
+            let url = `${cleanBase}/chat/completions`;
+
+            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
+            const body = JSON.stringify({
+                model: model,
+                messages: [{ role: "user", content: text }],
+                stream: false,
+                max_tokens: 50
+            });
+
+            let res = await fetch(url, { method: 'POST', headers, body });
+            if (res.status === 404 && !url.includes('/v1/')) {
+                url = `${cleanBase}/v1/chat/completions`;
+                res = await fetch(url, { method: 'POST', headers, body });
+            }
+
+            if (!res.ok) throw new Error(`API Error: ${res.status}`);
+            const data = await res.json();
+            return data.choices?.[0]?.message?.content;
+        };
+
+        // --- Config Modal (Werewolf Only) ---
+        const GlobalConfigModal = ({ open, onClose, configs, setConfigs, prompts, setPrompts, directorConfigId, setDirectorConfigId, directorRule, setDirectorRule, directorMode, setDirectorMode, contextWindowSize, setContextWindowSize, werewolfRolePrompts, setWerewolfRolePrompts, darkMode, addToast }) => {
+            const [activeTab, setActiveTab] = useState('models'); // 'models' | 'prompts' | 'director'
+
+            const [editingConfigId, setEditingConfigId] = useState(null);
+            const [localConfigs, setLocalConfigs] = useState(configs);
+            const [availableModels, setAvailableModels] = useState([]);
+            const [isChecking, setIsChecking] = useState(false);
+            const [isTesting, setIsTesting] = useState(false);
+
+            const [editingPromptId, setEditingPromptId] = useState(null);
+            const [localPrompts, setLocalPrompts] = useState(prompts);
+
+            const [localDirectorRule, setLocalDirectorRule] = useState(directorRule);
+            const [localDirectorMode, setLocalDirectorMode] = useState(directorMode);
+            const [localContextWindowSize, setLocalContextWindowSize] = useState(contextWindowSize);
+            const [localWerewolfRolePrompts, setLocalWerewolfRolePrompts] = useState(werewolfRolePrompts);
+
+            const [isRenaming, setIsRenaming] = useState(false);
+            const [renameValue, setRenameValue] = useState("");
+
+            useEffect(() => {
+                if (open) {
+                    setLocalConfigs(configs);
+                    setLocalPrompts(prompts);
+                    setLocalDirectorRule(directorRule);
+                    setLocalDirectorMode(directorMode);
+                    setLocalContextWindowSize(contextWindowSize);
+                    setLocalWerewolfRolePrompts(werewolfRolePrompts);
+                    setEditingConfigId(configs[0]?.id || null);
+                    setEditingPromptId(prompts[0]?.id || null);
+                    setIsRenaming(false);
+                }
+            }, [open, configs, prompts, directorRule, directorMode, contextWindowSize, werewolfRolePrompts]);
+
+            if (!open) return null;
+
+            const DIRECTOR_MODE_HELP = {
+                ai: {
+                    title: 'AI 导演（自动调度）',
+                    desc: '由导演模型根据规则与上下文决定下一位发言者。',
+                    tips: [
+                        '系统会自动将 {agent_descriptions} 替换为当前启用的演员列表。',
+                        '你可以添加规则，例如：“如果用户在提问，必须让‘理中客’回答”。',
+                        '你可以增加冲突，例如：“鼓励演员互相反驳对方的观点”。'
+                    ],
+                    usesPrompt: true
+                },
+                default: {
+                    title: '默认模式（@点名）',
+                    desc: '仅响应 @点名/@所有人 或顺序自动发言，不使用导演规则。',
+                    tips: [
+                        '该模式不会调用导演模型。',
+                        '导演规则不会生效。'
+                    ],
+                    usesPrompt: false
+                },
+                werewolf: {
+                    title: '狼人杀模式',
+                    desc: '进入狼人杀游戏流程与规则控制，不使用导演调度规则。',
+                    tips: [
+                        '聊天会被游戏阶段驱动。',
+                        '导演规则不会生效。'
+                    ],
+                    usesPrompt: false
+                }
+            };
+            const activeDirectorHelp = DIRECTOR_MODE_HELP[localDirectorMode] || DIRECTOR_MODE_HELP.ai;
+
+            const activeConfig = localConfigs.find(c => c.id === editingConfigId) || localConfigs[0];
+            const updateConfig = (field, value) => {
+                setLocalConfigs(prev => prev.map(c => c.id === editingConfigId ? { ...c, [field]: value } : c));
+            };
+
+            const addConfig = () => {
+                const newId = `config-${Date.now()}`;
+                const newConfig = { id: newId, name: '新配置', provider: 'openai', baseUrl: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-chat' };
+                setLocalConfigs([...localConfigs, newConfig]);
+                setEditingConfigId(newId);
+                setIsRenaming(false);
+            };
+
+            const deleteConfig = () => {
+                if (localConfigs.length <= 1) return addToast("至少保留一个模型配置", "error");
+                if (confirm(`确定删除 ${activeConfig.name}?`)) {
+                    const next = localConfigs.filter(c => c.id !== editingConfigId);
+                    setLocalConfigs(next);
+                    setEditingConfigId(next[0].id);
+                    setIsRenaming(false);
+                }
+            };
+
+            const fetchModels = async () => {
+                if (!activeConfig.apiKey) return addToast("请先填写 API Key", "error");
+                setIsChecking(true);
+                try {
+                    const baseUrl = (activeConfig.baseUrl || '').replace(/\/+$/, '');
+                    if (activeConfig.provider === 'google') {
+                        const res = await fetch(`${baseUrl}/v1beta/models?key=${activeConfig.apiKey}`);
+                        if (!res.ok) throw new Error(res.status);
+                        const data = await res.json();
+                        const ids = data.models?.filter(m => m.supportedGenerationMethods?.includes("generateContent")).map(m => m.name.replace('models/', '')) || [];
+                        setAvailableModels(ids);
+                        addToast(`获取到 ${ids.length} 个模型`);
+                        if (ids.length && !activeConfig.model) updateConfig('model', ids[0]);
+                    } else {
+                        let res = await fetch(`${baseUrl}/models`, { headers: { 'Authorization': `Bearer ${activeConfig.apiKey}` } });
+                        if (res.status === 404 && !baseUrl.includes('/v1')) res = await fetch(`${baseUrl}/v1/models`, { headers: { 'Authorization': `Bearer ${activeConfig.apiKey}` } });
+                        if (!res.ok) throw new Error(res.status);
+                        const data = await res.json();
+                        const ids = (data.data || []).map(m => m.id).sort();
+                        setAvailableModels(ids);
+                        addToast(`获取到 ${ids.length} 个模型`);
+                        if (ids.length && !activeConfig.model) updateConfig('model', ids[0]);
+                    }
+                } catch (e) {
+                    addToast(`获取失败: ${e.message}`, "error");
+                } finally {
+                    setIsChecking(false);
+                }
+            };
+
+            const testModel = async () => {
+                if (!activeConfig.apiKey || !activeConfig.model) return addToast("请完善配置", "error");
+                setIsTesting(true);
+                try {
+                    const baseUrl = (activeConfig.baseUrl || '').replace(/\/+$/, '');
+                    if (activeConfig.provider === 'google') await callGoogle(activeConfig.apiKey, baseUrl, activeConfig.model, "Hi");
+                    else await callOpenAI(activeConfig.apiKey, baseUrl, activeConfig.model, "Hi");
+                    addToast("测试通过！模型可用");
+                } catch (e) {
+                    addToast(`测试失败: ${e.message}`, "error");
+                } finally {
+                    setIsTesting(false);
+                }
+            };
+
+            const activePrompt = localPrompts.find(p => p.id === editingPromptId) || localPrompts[0];
+            const updatePrompt = (field, value) => {
+                setLocalPrompts(prev => prev.map(p => p.id === editingPromptId ? { ...p, [field]: value } : p));
+            };
+
+            const addPrompt = () => {
+                const newId = `prompt-${Date.now()}`;
+                setLocalPrompts([...localPrompts, { id: newId, name: '新剧本', content: '你是一个...' }]);
+                setEditingPromptId(newId);
+                setIsRenaming(false);
+            };
+
+            const deletePrompt = () => {
+                if (localPrompts.length <= 1) return addToast("至少保留一个剧本", "error");
+                if (confirm(`确定删除 ${activePrompt.name}?`)) {
+                    const next = localPrompts.filter(p => p.id !== editingPromptId);
+                    setLocalPrompts(next);
+                    setEditingPromptId(next[0].id);
+                    setIsRenaming(false);
+                }
+            };
+
+            const handleSaveAll = () => {
+                setConfigs(localConfigs);
+                setPrompts(localPrompts);
+                setDirectorRule(localDirectorRule);
+                setDirectorMode(localDirectorMode);
+                setContextWindowSize(Number(localContextWindowSize) || 5);
+                setWerewolfRolePrompts(localWerewolfRolePrompts);
+                addToast("所有配置已保存");
+                onClose();
+            };
+
+            const startRename = (currentName) => {
+                setRenameValue(currentName);
+                setIsRenaming(true);
+            };
+
+            const finishRenameModel = () => {
+                if(renameValue.trim()) updateConfig('name', renameValue.trim());
+                setIsRenaming(false);
+            };
+
+            const finishRenamePrompt = () => {
+                if(renameValue.trim()) updatePrompt('name', renameValue.trim());
+                setIsRenaming(false);
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 fade-enter">
+                    <div className={cn("w-full max-w-4xl rounded-xl shadow-2xl flex flex-col h-[85vh]", darkMode ? "bg-zinc-900 border border-zinc-800 text-zinc-100" : "bg-white text-zinc-900")}>
+                        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center shrink-0">
+                            <h3 className="text-lg font-bold flex items-center gap-2"><Icons.Database className="w-5 h-5" /> 全局资源配置中心</h3>
+                            <button onClick={onClose}><Icons.X className="w-5 h-5" /></button>
+                        </div>
+
+                        <div className="flex flex-1 overflow-hidden">
+                            <div className="w-48 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 p-3 space-y-1 shrink-0">
+                                <button onClick={() => { setActiveTab('models'); setIsRenaming(false); }} className={cn("w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors", activeTab === 'models' ? "bg-purple-600 text-white" : "hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400")}>
+                                    <Icons.Zap className="w-4 h-4"/> AI 模型连接
+                                </button>
+                                <button onClick={() => { setActiveTab('prompts'); setIsRenaming(false); }} className={cn("w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors", activeTab === 'prompts' ? "bg-purple-600 text-white" : "hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400")}>
+                                    <Icons.FileText className="w-4 h-4"/> 人设剧本库
+                                </button>
+                                <button onClick={() => { setActiveTab('director'); setIsRenaming(false); }} className={cn("w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors", activeTab === 'director' ? "bg-purple-600 text-white" : "hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400")}>
+                                    <Icons.Clapperboard className="w-4 h-4"/> 导演 (规则)
+                                </button>
+                            </div>
+
+                            <div className="flex-1 flex overflow-hidden">
+                                {activeTab === 'models' && (
+                                    <>
+                                        <div className="w-56 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto p-2">
+                                            <div className="flex justify-between items-center px-2 mb-2">
+                                                <span className="text-xs font-bold text-zinc-500">已存配置</span>
+                                                <button onClick={addConfig} className="text-purple-500 hover:bg-purple-100 dark:hover:bg-purple-900/20 p-1 rounded"><Icons.Plus className="w-3 h-3"/></button>
+                                            </div>
+                                            {localConfigs.map(c => (
+                                                <div key={c.id} onClick={() => { setEditingConfigId(c.id); setAvailableModels([]); setIsRenaming(false); }} className={cn("px-3 py-2 rounded text-sm cursor-pointer truncate mb-1 border", editingConfigId === c.id ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-300" : "border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                                                    {c.name}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar space-y-5">
+                                            <div className="flex justify-between items-center group">
+                                                <div className="flex-1 flex items-center gap-2">
+                                                    {isRenaming ? (
+                                                        <div className="flex items-center gap-2 w-full">
+                                                            <input 
+                                                                value={renameValue} 
+                                                                onChange={e => setRenameValue(e.target.value)}
+                                                                onBlur={finishRenameModel}
+                                                                onKeyDown={e => e.key === 'Enter' && finishRenameModel()}
+                                                                autoFocus
+                                                                className={cn("text-lg font-bold bg-transparent border-b-2 border-purple-500 outline-none w-full pb-1", darkMode ? "text-white" : "text-zinc-900")} 
+                                                            />
+                                                            <button onClick={finishRenameModel} className="text-green-500 hover:text-green-600"><Icons.CheckCircle className="w-5 h-5"/></button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2 cursor-pointer hover:opacity-80" onClick={() => startRename(activeConfig.name)}>
+                                                            <h2 className="text-lg font-bold truncate">{activeConfig.name}</h2>
+                                                            <Icons.Edit className="w-4 h-4 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity"/>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <button onClick={deleteConfig} className="text-red-500 p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded ml-4"><Icons.Trash className="w-4 h-4"/></button>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="block text-xs font-medium text-zinc-500 mb-1">服务商</label>
+                                                    <select value={activeConfig.provider} onChange={e => updateConfig('provider', e.target.value)} className={cn("w-full px-3 py-2 rounded border text-sm", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}>
+                                                        <option value="openai">OpenAI 兼容 (DeepSeek/GPT)</option>
+                                                        <option value="google">Google Gemini</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-zinc-500 mb-1">Base URL</label>
+                                                    <input value={activeConfig.baseUrl} onChange={e => updateConfig('baseUrl', e.target.value)} className={cn("w-full px-3 py-2 rounded border text-sm font-mono", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")} />
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-xs font-medium text-zinc-500 mb-1">API Key</label>
+                                                <input type="password" value={activeConfig.apiKey} onChange={e => updateConfig('apiKey', e.target.value)} className={cn("w-full px-3 py-2 rounded border text-sm font-mono", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")} placeholder="sk-..." />
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-xs font-medium text-zinc-500 mb-1">模型 ID (Model)</label>
+                                                <div className="flex gap-2 items-center">
+                                                    <div className="flex-1 relative">
+                                                        {availableModels.length > 0 ? (
+                                                            <select value={activeConfig.model} onChange={e => updateConfig('model', e.target.value)} className={cn("w-full px-3 py-2 rounded border text-sm font-mono appearance-none", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}>
+                                                                {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+                                                            </select>
+                                                        ) : (
+                                                            <input value={activeConfig.model} onChange={e => updateConfig('model', e.target.value)} className={cn("w-full px-3 py-2 rounded border text-sm font-mono", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")} placeholder="例如: deepseek-chat" />
+                                                        )}
+                                                    </div>
+
+                                                    <button onClick={fetchModels} disabled={isChecking} className={cn("px-3 py-2 rounded text-sm font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors border shadow-sm", isChecking ? "opacity-50" : "", darkMode ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-200" : "bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-700")}>
+                                                        {isChecking ? <Icons.Loader className="w-4 h-4"/> : <Icons.Activity className="w-4 h-4 text-purple-500"/>}
+                                                        获取列表
+                                                    </button>
+                                                    <button onClick={testModel} disabled={isTesting} className={cn("px-3 py-2 rounded text-sm font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors border shadow-sm", isTesting ? "opacity-50" : "", darkMode ? "bg-green-900/20 border-green-900/30 text-green-400 hover:bg-green-900/30" : "bg-green-50 border-green-100 text-green-600 hover:bg-green-100")}>
+                                                        {isTesting ? <Icons.Loader className="w-4 h-4"/> : <Icons.CheckCircle className="w-4 h-4"/>}
+                                                        连通测试
+                                                    </button>
+                                                </div>
+                                                <p className="text-[10px] text-zinc-500 mt-2 flex items-center gap-1">
+                                                    <Icons.Zap className="w-3 h-3"/> 提示：输入 Key 后先点击“获取列表”，若失败请检查 Base URL。
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+
+                                {activeTab === 'prompts' && (
+                                    <>
+                                        <div className="w-56 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto p-2">
+                                            <div className="flex justify-between items-center px-2 mb-2">
+                                                <span className="text-xs font-bold text-zinc-500">剧本库</span>
+                                                <button onClick={addPrompt} className="text-purple-500 hover:bg-purple-100 dark:hover:bg-purple-900/20 p-1 rounded"><Icons.Plus className="w-3 h-3"/></button>
+                                            </div>
+                                            {localPrompts.map(p => (
+                                                <div key={p.id} onClick={() => { setEditingPromptId(p.id); setIsRenaming(false); }} className={cn("px-3 py-2 rounded text-sm cursor-pointer truncate mb-1 border", editingPromptId === p.id ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-300" : "border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800")}>
+                                                    {p.name}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar space-y-5">
+                                            <div className="flex justify-between items-center group">
+                                                <div className="flex-1 flex items-center gap-2">
+                                                    {isRenaming ? (
+                                                        <div className="flex items-center gap-2 w-full">
+                                                            <input 
+                                                                value={renameValue} 
+                                                                onChange={e => setRenameValue(e.target.value)}
+                                                                onBlur={finishRenamePrompt}
+                                                                onKeyDown={e => e.key === 'Enter' && finishRenamePrompt()}
+                                                                autoFocus
+                                                                className={cn("text-lg font-bold bg-transparent border-b-2 border-purple-500 outline-none w-full pb-1", darkMode ? "text-white" : "text-zinc-900")} 
+                                                            />
+                                                            <button onClick={finishRenamePrompt} className="text-green-500 hover:text-green-600"><Icons.CheckCircle className="w-5 h-5"/></button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2 cursor-pointer hover:opacity-80" onClick={() => startRename(activePrompt.name)}>
+                                                            <h2 className="text-lg font-bold truncate">{activePrompt.name}</h2>
+                                                            <Icons.Edit className="w-4 h-4 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity"/>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <button onClick={deletePrompt} className="text-red-500 p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded ml-4"><Icons.Trash className="w-4 h-4"/></button>
+                                            </div>
+                                            <div className="flex-1 flex flex-col h-full pb-10">
+                                                <label className="block text-xs font-medium text-zinc-500 mb-1">系统提示词 (System Prompt)</label>
+                                                <textarea 
+                                                    value={activePrompt.content}
+                                                    onChange={e => updatePrompt('content', e.target.value)}
+                                                    className={cn("flex-1 w-full p-4 rounded border text-sm resize-none leading-relaxed font-mono", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}
+                                                    placeholder="你是一个..."
+                                                />
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+
+                                {activeTab === 'director' && (
+                                    <div className="flex-1 p-6 overflow-y-auto custom-scrollbar flex flex-col h-full">
+                                        <h2 className="text-lg font-bold mb-4 flex items-center gap-2"><Icons.Clapperboard className="w-5 h-5"/> 导演 (调度规则)</h2>
+                                        <div className="grid grid-cols-2 gap-4 mb-4">
+                                            <div>
+                                                <label className="block text-xs font-medium text-zinc-500 mb-1">导演模式</label>
+                                                <select value={localDirectorMode} onChange={e => setLocalDirectorMode(e.target.value)} className={cn("w-full px-3 py-2 rounded border text-sm", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}>
+                                                    <option value="ai">AI 导演 (自动调度)</option>
+                                                    <option value="default">默认模式 (@点名)</option>
+                                                    <option value="werewolf">🐺 狼人杀模式</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-zinc-500 mb-1">上下文窗口大小</label>
+                                                <input type="number" min="1" max="100" value={localContextWindowSize} onChange={e => setLocalContextWindowSize(e.target.value)} className={cn("w-full px-3 py-2 rounded border text-sm", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")} />
+                                            </div>
+                                        </div>
+                                        <div className="bg-zinc-100 dark:bg-zinc-800/50 p-4 rounded-lg mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+                                            <p className="mb-2 font-bold">说明：{activeDirectorHelp.title}</p>
+                                            <p>{activeDirectorHelp.desc}</p>
+                                            <ul className="list-disc list-inside mt-2 space-y-1 text-xs opacity-80">
+                                                {activeDirectorHelp.tips.map((tip, idx) => (
+                                                    <li key={idx}>
+                                                        {tip.includes('{agent_descriptions}') ? (
+                                                            <>系统会自动将 <span className="font-mono text-purple-500">{`{agent_descriptions}`}</span> 替换为当前启用的演员列表。</>
+                                                        ) : tip}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                        <div className="flex-1 pb-10 flex flex-col">
+                                            {localDirectorMode === 'ai' && (
+                                                <>
+                                                    <label className="block text-xs font-medium text-zinc-500 mb-1">调度指令 (Director Prompt)</label>
+                                                    <textarea 
+                                                        value={localDirectorRule}
+                                                        onChange={e => setLocalDirectorRule(e.target.value)}
+                                                        className={cn(
+                                                            "flex-1 w-full p-4 rounded border text-sm resize-none leading-relaxed font-mono",
+                                                            darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200"
+                                                        )}
+                                                    />
+                                                </>
+                                            )}
+
+                                            {localDirectorMode === 'werewolf' && (
+                                                <div className="mt-4">
+                                                    <label className="block text-xs font-medium text-zinc-500 mb-2">狼人杀角色提示词 (可编辑)</label>
+                                                    <div className="grid grid-cols-1 gap-3">
+                                                        {Object.entries(localWerewolfRolePrompts || {}).map(([key, value]) => (
+                                                            <div key={key} className="p-3 rounded-lg border border-zinc-200 dark:border-zinc-800">
+                                                                <div className="text-xs font-bold text-zinc-500 mb-2">{key}</div>
+                                                                <textarea
+                                                                    value={value}
+                                                                    onChange={e => setLocalWerewolfRolePrompts(prev => ({ ...prev, [key]: e.target.value }))}
+                                                                    className={cn("w-full p-3 rounded border text-sm resize-none leading-relaxed font-mono", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}
+                                                                    rows={3}
+                                                                />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 flex justify-between items-center shrink-0">
+                            <div className="flex items-center gap-3">
+                                <span className="text-xs text-zinc-500">导演 (调度员) 使用配置:</span>
+                                <select 
+                                    value={directorConfigId}
+                                    onChange={e => setDirectorConfigId(e.target.value)}
+                                    className={cn("text-xs px-2 py-1.5 rounded border max-w-[200px]", darkMode ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300")}
+                                >
+                                    {localConfigs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-700">取消</button>
+                                <button onClick={handleSaveAll} className="px-4 py-2 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center gap-2 shadow-lg shadow-purple-500/20"><Icons.Save className="w-4 h-4"/> 保存所有更改</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Agent Modal ---
+        const AgentModal = ({ open, onClose, agent, configs, prompts, onSave, onDelete, isNew, darkMode }) => {
+            const [localAgent, setLocalAgent] = useState({ name: '', avatarColor: 'bg-gray-500', configId: '', promptId: '', model: '' });
+
+            const [availableModels, setAvailableModels] = useState([]);
+            const [isChecking, setIsChecking] = useState(false);
+            const [isTesting, setIsTesting] = useState(false);
+            const [testResult, setTestResult] = useState(null);
+
+            useEffect(() => {
+                if (open) {
+                    if (agent) {
+                        setLocalAgent({ ...agent, model: agent.model || '' });
+                    } else if (isNew) {
+                        setLocalAgent({
+                            id: `agent-${Date.now()}`,
+                            name: '新演员',
+                            avatarColor: 'bg-purple-500',
+                            configId: configs[0]?.id,
+                            promptId: prompts[0]?.id,
+                            model: '',
+                            enabled: true
+                        });
+                    }
+                    setAvailableModels([]);
+                    setTestResult(null);
+                }
+            }, [open, agent, isNew, configs, prompts]);
+
+            if (!open) return null;
+            const colors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-green-500', 'bg-blue-500', 'bg-purple-500', 'bg-pink-500', 'bg-zinc-500'];
+
+            const activeConfig = configs.find(c => c.id === localAgent.configId);
+
+            const fetchModels = async () => {
+                if (!activeConfig || !activeConfig.apiKey) {
+                    setTestResult({ type: 'error', msg: "当前配置缺少 API Key" });
+                    return;
+                }
+                setIsChecking(true);
+                try {
+                    const baseUrl = (activeConfig.baseUrl || '').replace(/\/+$/, '');
+                    if (activeConfig.provider === 'google') {
+                        const res = await fetch(`${baseUrl}/v1beta/models?key=${activeConfig.apiKey}`);
+                        if (!res.ok) throw new Error(res.status);
+                        const data = await res.json();
+                        const ids = data.models?.filter(m => m.supportedGenerationMethods?.includes("generateContent")).map(m => m.name.replace('models/', '')) || [];
+                        setAvailableModels(ids);
+                        setTestResult({ type: 'success', msg: `获取到 ${ids.length} 个模型` });
+                    } else {
+                        let res = await fetch(`${baseUrl}/models`, { headers: { 'Authorization': `Bearer ${activeConfig.apiKey}` } });
+                        if (res.status === 404 && !baseUrl.includes('/v1')) res = await fetch(`${baseUrl}/v1/models`, { headers: { 'Authorization': `Bearer ${activeConfig.apiKey}` } });
+                        if (!res.ok) throw new Error(res.status);
+                        const data = await res.json();
+                        const ids = (data.data || []).map(m => m.id).sort();
+                        setAvailableModels(ids);
+                        setTestResult({ type: 'success', msg: `获取到 ${ids.length} 个模型` });
+                    }
+                } catch (e) {
+                    setTestResult({ type: 'error', msg: `获取失败: ${e.message}` });
+                } finally {
+                    setIsChecking(false);
+                }
+            };
+
+            const testModel = async () => {
+                const modelToTest = localAgent.model || activeConfig?.model;
+                if (!activeConfig?.apiKey || !modelToTest) {
+                    setTestResult({ type: 'error', msg: "缺少配置或模型 ID" });
+                    return;
+                }
+                setIsTesting(true);
+                try {
+                    const baseUrl = (activeConfig.baseUrl || '').replace(/\/+$/, '');
+                    if (activeConfig.provider === 'google') await callGoogle(activeConfig.apiKey, baseUrl, modelToTest, "Hi");
+                    else await callOpenAI(activeConfig.apiKey, baseUrl, modelToTest, "Hi");
+                    setTestResult({ type: 'success', msg: `测试通过：${modelToTest}` });
+                } catch (e) {
+                    setTestResult({ type: 'error', msg: `测试失败: ${e.message}` });
+                } finally {
+                    setIsTesting(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 fade-enter">
+                    <div className={cn("w-full max-w-sm rounded-xl shadow-2xl p-6", darkMode ? "bg-zinc-900 border border-zinc-800 text-zinc-100" : "bg-white text-zinc-900")}>
+                        <h2 className="text-lg font-bold mb-4 flex justify-between items-center">
+                            <span>{isNew ? '添加演员' : '编辑演员'}</span>
+                            {!isNew && <button onClick={() => onDelete(localAgent.id)} className="text-red-500"><Icons.Trash className="w-4 h-4"/></button>}
+                        </h2>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-medium text-zinc-500 mb-1">显示名称</label>
+                                <input value={localAgent.name} onChange={e => setLocalAgent({...localAgent, name: e.target.value})} className={cn("w-full px-3 py-2 rounded border text-sm", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")} />
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 p-3 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50">
+                                <div>
+                                    <label className="block text-xs font-bold text-zinc-500 mb-1 uppercase">大脑 (AI 模型配置)</label>
+                                    <select value={localAgent.configId} onChange={e => setLocalAgent({...localAgent, configId: e.target.value})} className={cn("w-full px-2 py-1.5 rounded border text-sm", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}>
+                                        {configs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-medium text-zinc-500 mb-1 flex justify-between">
+                                        <span>模型微调 (可选)</span>
+                                        <span className="text-[10px] opacity-70">默认: {activeConfig?.model || '未知'}</span>
+                                    </label>
+                                    <div className="flex gap-1 mb-1">
+                                        <div className="flex-1 relative">
+                                            {availableModels.length > 0 ? (
+                                                <select 
+                                                    value={localAgent.model} 
+                                                    onChange={e => setLocalAgent({...localAgent, model: e.target.value})} 
+                                                    className={cn("w-full px-2 py-1.5 rounded border text-sm appearance-none", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}
+                                                >
+                                                    <option value="">跟随全局 ({activeConfig?.model})</option>
+                                                    {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+                                                </select>
+                                            ) : (
+                                                <input 
+                                                    value={localAgent.model} 
+                                                    onChange={e => setLocalAgent({...localAgent, model: e.target.value})} 
+                                                    placeholder="留空使用全局默认值" 
+                                                    className={cn("w-full px-2 py-1.5 rounded border text-xs", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")} 
+                                                />
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 justify-end">
+                                        <button onClick={fetchModels} disabled={isChecking} className="text-[10px] text-purple-500 hover:underline flex items-center gap-1">
+                                            {isChecking ? <Icons.Loader className="w-3 h-3"/> : <Icons.Activity className="w-3 h-3"/>} 获取列表
+                                        </button>
+                                        <button onClick={testModel} disabled={isTesting} className="text-[10px] text-green-500 hover:underline flex items-center gap-1">
+                                            {isTesting ? <Icons.Loader className="w-3 h-3"/> : <Icons.CheckCircle className="w-3 h-3"/>} 连通测试
+                                        </button>
+                                    </div>
+                                    {testResult && (
+                                        <div className={cn("text-[10px] mt-1 text-right", testResult.type === 'error' ? "text-red-500" : "text-green-500")}>
+                                            {testResult.msg}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-zinc-500 mb-1 uppercase">灵魂 (人设剧本)</label>
+                                    <select value={localAgent.promptId} onChange={e => setLocalAgent({...localAgent, promptId: e.target.value})} className={cn("w-full px-2 py-1.5 rounded border text-sm", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}>
+                                        {prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-zinc-500 mb-1">头像颜色</label>
+                                <div className="flex gap-2 flex-wrap">
+                                    {colors.map(c => (
+                                        <button key={c} onClick={() => setLocalAgent({...localAgent, avatarColor: c})} className={cn("w-6 h-6 rounded-full transition-transform hover:scale-110", c, localAgent.avatarColor === c ? "ring-2 ring-offset-2 ring-white" : "")} />
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button onClick={onClose} className="px-3 py-2 text-sm text-zinc-500">取消</button>
+                            <button onClick={() => { onSave(localAgent); onClose(); }} className="px-3 py-2 text-sm bg-purple-600 text-white rounded">保存</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main App ---
+        const App = () => {
+            const [darkMode, setDarkMode] = useState(true);
+            const [configs, setConfigs] = useState(() => safeParse(localStorage.getItem('ww_configs'), DEFAULT_MODEL_CONFIGS));
+            const [prompts, setPrompts] = useState(() => safeParse(localStorage.getItem('ww_prompts'), DEFAULT_SYSTEM_PROMPTS));
+            const [agents, setAgents] = useState(() => safeParse(localStorage.getItem('ww_agents_v2'), DEFAULT_AGENTS));
+            const [directorConfigId, setDirectorConfigId] = useState(() => localStorage.getItem('ww_director_config_id') || configs[0]?.id);
+            const [directorRule, setDirectorRule] = useState(() => localStorage.getItem('ww_director_rule') || DEFAULT_DIRECTOR_RULE);
+            const [directorMode, setDirectorMode] = useState(() => localStorage.getItem('ww_director_mode') || 'default');
+            const [contextWindowSize, setContextWindowSize] = useState(() => Number(localStorage.getItem('ww_context_window')) || 12);
+            const [werewolfRolePrompts, setWerewolfRolePrompts] = useState(() => safeParse(localStorage.getItem('ww_role_prompts'), DEFAULT_WEREWOLF_ROLE_PROMPTS));
+
+            const [messages, setMessages] = useState([]);
+            const [smallGroupMessages, setSmallGroupMessages] = useState([]);
+            const [input, setInput] = useState('');
+            const [smallGroupInput, setSmallGroupInput] = useState('');
+            const [isAutoPlay, setIsAutoPlay] = useState(false);
+            const [directorStatus, setDirectorStatus] = useState(null);
+            const [activeSpeakerId, setActiveSpeakerId] = useState(null);
+            const [smallGroupMembers, setSmallGroupMembers] = useState(() => safeParse(localStorage.getItem('ww_small_group_members'), []));
+
+            const [werewolfGame, setWerewolfGame] = useState(null);
+            const [showWerewolfSetup, setShowWerewolfSetup] = useState(false);
+            const [werewolfRevealAll, setWerewolfRevealAll] = useState(false);
+            const [werewolfLastPlayers, setWerewolfLastPlayers] = useState([]);
+            const [werewolfConfig, setWerewolfConfig] = useState(() => safeParse(localStorage.getItem('ww_config'), {
+                wolfCount: 2,
+                roles: ['seer', 'witch', 'hunter'],
+                playerJoin: true,
+                playerName: '玩家',
+                witchSelfSave: false
+            }));
+
+            const [showConfig, setShowConfig] = useState(false);
+            const [showAgentModal, setShowAgentModal] = useState(false);
+            const [editingAgentId, setEditingAgentId] = useState(null);
+            const [toasts, setToasts] = useState([]);
+            const [smallGroupVisible, setSmallGroupVisible] = useState(true);
+            const [smallGroupWidth, setSmallGroupWidth] = useState(() => Number(localStorage.getItem('ww_small_group_width')) || 320);
+            const [isDragging, setIsDragging] = useState(false);
+            const messagesEndRef = useRef(null);
+            const smallGroupEndRef = useRef(null);
+            const autoPlayRef = useRef(isAutoPlay);
+            const autoPlayTimeoutRef = useRef(null);
+            const messagesRef = useRef(messages);
+            const smallGroupMessagesRef = useRef(smallGroupMessages);
+            const speakingLockRef = useRef(false);
+            const werewolfGameRef = useRef(werewolfGame);
+
+            useEffect(() => {
+                localStorage.setItem('ww_configs', JSON.stringify(configs));
+                localStorage.setItem('ww_prompts', JSON.stringify(prompts));
+                localStorage.setItem('ww_agents_v2', JSON.stringify(agents));
+                localStorage.setItem('ww_director_config_id', directorConfigId);
+                localStorage.setItem('ww_director_rule', directorRule);
+                localStorage.setItem('ww_director_mode', directorMode);
+                localStorage.setItem('ww_context_window', String(contextWindowSize));
+                localStorage.setItem('ww_small_group_members', JSON.stringify(smallGroupMembers));
+                localStorage.setItem('ww_small_group_width', String(smallGroupWidth));
+                localStorage.setItem('ww_config', JSON.stringify(werewolfConfig));
+                localStorage.setItem('ww_role_prompts', JSON.stringify(werewolfRolePrompts));
+            }, [configs, prompts, agents, directorConfigId, directorRule, directorMode, contextWindowSize, smallGroupMembers, smallGroupWidth, werewolfConfig, werewolfRolePrompts]);
+
+            useEffect(() => {
+                if (darkMode) document.documentElement.classList.add('dark');
+                else document.documentElement.classList.remove('dark');
+            }, [darkMode]);
+
+            useEffect(() => { messagesRef.current = messages; }, [messages]);
+            useEffect(() => { smallGroupMessagesRef.current = smallGroupMessages; }, [smallGroupMessages]);
+            useEffect(() => {
+                werewolfGameRef.current = werewolfGame;
+                if (werewolfGame?.players?.length) {
+                    setWerewolfLastPlayers(werewolfGame.players.map(p => ({ ...p })));
+                }
+            }, [werewolfGame]);
+
+            useEffect(() => {
+                if (!isDragging) return;
+                const handleMove = (event) => {
+                    const next = Math.min(420, Math.max(240, window.innerWidth - event.clientX));
+                    setSmallGroupWidth(next);
+                };
+                const handleUp = () => setIsDragging(false);
+                window.addEventListener('mousemove', handleMove);
+                window.addEventListener('mouseup', handleUp);
+                return () => {
+                    window.removeEventListener('mousemove', handleMove);
+                    window.removeEventListener('mouseup', handleUp);
+                };
+            }, [isDragging]);
+
+            useEffect(() => {
+                autoPlayRef.current = isAutoPlay;
+                if (!isAutoPlay && autoPlayTimeoutRef.current) {
+                    clearTimeout(autoPlayTimeoutRef.current);
+                    autoPlayTimeoutRef.current = null;
+                }
+            }, [isAutoPlay]);
+
+            useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, directorStatus, activeSpeakerId]);
+            useEffect(() => smallGroupEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [smallGroupMessages, activeSpeakerId]);
+
+            const addToast = (msg, type) => {
+                const id = Date.now();
+                setToasts(p => [...p, { id, msg, type }]);
+                setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3000);
+            };
+
+            const Markdown = ({ content }) => {
+                const safeContent = String(content ?? '');
+                const html = useMemo(() => marked.parse(safeContent), [safeContent]);
+                return <div className="prose prose-sm dark:prose-invert max-w-none break-words" dangerouslySetInnerHTML={{ __html: html }} />;
+            };
+
+            const getEnabledAgents = () => agents.filter(a => a.enabled);
+            const getSmallGroupAgents = () => agents.filter(a => a.enabled && smallGroupMembers.includes(a.id));
+            const formatTime = (timestamp) => new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+            const copyToClipboard = async (text) => {
+                if (!text) return;
+                try {
+                    await navigator.clipboard.writeText(text);
+                    addToast('已复制到剪贴板', 'success');
+                } catch (e) {
+                    addToast('复制失败，请检查浏览器权限', 'error');
+                }
+            };
+
+            const clearChat = (scope, options = {}) => {
+                const { confirm = true, pauseGame = true, toast = true } = options;
+                const ask = (text) => {
+                    try {
+                        if (!confirm) return true;
+                        if (typeof window !== 'undefined' && typeof window.confirm === 'function') return window.confirm(text);
+                    } catch (e) {}
+                    return true;
+                };
+                if (scope === 'all') {
+                    if (!ask('确定清空大群和小群聊天记录？')) return;
+                    setMessages([]);
+                    setSmallGroupMessages([]);
+                    messagesRef.current = [];
+                    smallGroupMessagesRef.current = [];
+                } else {
+                    const label = scope === 'small' ? '小群' : '大群';
+                    if (!ask(`确定清空${label}聊天记录？`)) return;
+                    if (scope === 'small') {
+                        setSmallGroupMessages([]);
+                        smallGroupMessagesRef.current = [];
+                    } else {
+                        setMessages([]);
+                        messagesRef.current = [];
+                    }
+                }
+
+                if (autoPlayTimeoutRef.current) {
+                    clearTimeout(autoPlayTimeoutRef.current);
+                    autoPlayTimeoutRef.current = null;
+                }
+
+                setActiveSpeakerId(null);
+                speakingLockRef.current = false;
+
+                if (toast) {
+                    if (directorMode === 'werewolf' && werewolfGameRef.current && pauseGame) {
+                        setWerewolfGame(prev => prev ? { ...prev, paused: true } : prev);
+                        addToast('已清空聊天并暂停游戏', 'success');
+                    } else {
+                        addToast('已清空聊天', 'success');
+                    }
+                } else if (directorMode === 'werewolf' && werewolfGameRef.current && pauseGame) {
+                    setWerewolfGame(prev => prev ? { ...prev, paused: true } : prev);
+                }
+            };
+
+            const exportChat = (format, scope = 'all') => {
+                const mainHistory = messagesRef.current;
+                const smallHistory = smallGroupMessagesRef.current;
+                const exportList = scope === 'all'
+                    ? mergeHistories(mainHistory, smallHistory)
+                    : (scope === 'small' ? smallHistory : mainHistory);
+
+                if (exportList.length === 0) {
+                    addToast('没有可导出的内容', 'error');
+                    return;
+                }
+
+                const now = new Date();
+                const safeTime = now.toISOString().replace(/[:.]/g, '-');
+                const fileBase = `werewolf-export-${scope}-${safeTime}`;
+
+                let content = '';
+                let mime = 'text/plain';
+                let ext = 'txt';
+
+                if (format === 'json') {
+                    content = JSON.stringify(exportList, null, 2);
+                    mime = 'application/json';
+                    ext = 'json';
+                } else if (format === 'md') {
+                    ext = 'md';
+                    mime = 'text/markdown';
+                    content = exportList.map(m => {
+                        const roomTag = m.room === 'small' ? '[小群]' : '[大群]';
+                        const name = m.role === 'user' ? '你' : (m.senderName || '未知');
+                        const time = m.time ? ` ${m.time}` : '';
+                        return `- ${roomTag} ${name}${time}: ${m.content}`;
+                    }).join('\n');
+                } else {
+                    ext = 'txt';
+                    mime = 'text/plain';
+                    content = exportList.map(m => {
+                        const roomTag = m.room === 'small' ? '[小群]' : '[大群]';
+                        const name = m.role === 'user' ? '你' : (m.senderName || '未知');
+                        const time = m.time ? ` ${m.time}` : '';
+                        return `${roomTag} ${name}${time}: ${m.content}`;
+                    }).join('\n');
+                }
+
+                const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${fileBase}.${ext}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const mergeHistories = (mainHistory, smallHistory) => {
+                const merged = [...mainHistory, ...smallHistory].map(m => ({ ...m }));
+                return merged.sort((a, b) => (a.id || 0) - (b.id || 0));
+            };
+
+            const getNextAgentByOrder = (enabledAgents, history) => {
+                if (enabledAgents.length === 0) return null;
+                const lastAgentMsg = [...history].reverse().find(m => m.role === 'assistant' && m.senderId);
+                if (!lastAgentMsg) return enabledAgents[0];
+                const lastIdx = enabledAgents.findIndex(a => a.id === lastAgentMsg.senderId);
+                if (lastIdx === -1) return enabledAgents[0];
+                return enabledAgents[(lastIdx + 1) % enabledAgents.length];
+            };
+
+            const findMentionedAgent = (text, enabledAgents) => {
+                if (!text) return null;
+                const normalized = text.trim();
+                return enabledAgents.find(a => normalized.includes(`@${a.name}`));
+            };
+
+            const hasMentionAll = (text) => {
+                if (!text) return false;
+                return text.includes('@所有人') || text.toLowerCase().includes('@all');
+            };
+
+            const formatContextMessages = (history, tag) => history.map(m => ({
+                role: m.role === 'user' ? 'user' : 'assistant',
+                content: `${tag}${m.senderName ? m.senderName + ': ' : ''}${m.content}`
+            }));
+
+            const getCombinedContextMessages = () => {
+                const mainHistory = messagesRef.current;
+                const smallHistory = smallGroupMessagesRef.current;
+                const combined = mergeHistories(mainHistory, smallHistory).slice(-contextWindowSize);
+                return combined.map(m => ({
+                    role: m.role === 'user' ? 'user' : 'assistant',
+                    content: `${m.room === 'small' ? '[小群] ' : '[大群] '}${m.senderName ? m.senderName + ': ' : ''}${m.content}`
+                }));
+            };
+
+            const parseJSONFromText = (rawText) => {
+                if (!rawText) return null;
+                const trimmed = rawText.trim();
+                const tryParse = (candidate) => {
+                    try { return JSON.parse(candidate); } catch (e) { return null; }
+                };
+                if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                    const parsed = tryParse(trimmed);
+                    if (parsed) return parsed;
+                }
+                const codeBlockMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/i);
+                if (codeBlockMatch) {
+                    const parsed = tryParse(codeBlockMatch[1]);
+                    if (parsed) return parsed;
+                }
+                const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+                if (jsonMatch) return tryParse(jsonMatch[0]);
+                return null;
+            };
+
+            const createSystemMsg = (content, room = 'main') => ({
+                id: Date.now(),
+                role: 'system',
+                content,
+                room,
+                time: formatTime(Date.now()),
+                isSystem: true
+            });
+
+            const createUserMsg = (content, room = 'main', options = {}) => ({
+                id: Date.now(),
+                role: 'user',
+                content,
+                room,
+                time: formatTime(Date.now()),
+                isAction: !!options.isAction,
+                actionType: options.actionType || null
+            });
+
+            const createAssistantMsg = (content, sender, room = 'main') => ({
+                id: Date.now() + Math.random(),
+                role: 'assistant',
+                senderId: sender?.id,
+                senderName: sender?.name,
+                avatarColor: sender?.avatarColor,
+                content,
+                room,
+                time: formatTime(Date.now())
+            });
+
+            const isGamePaused = (game) => !game || game.paused || werewolfGameRef.current?.paused;
+
+            const tallyVotes = (votes, players) => {
+                const voteCount = {};
+                Object.values(votes || {}).forEach(targetId => {
+                    if (!targetId || targetId === 'abstain') return;
+                    voteCount[targetId] = (voteCount[targetId] || 0) + 1;
+                });
+                let maxVotes = 0;
+                let topTargets = [];
+                Object.entries(voteCount).forEach(([id, count]) => {
+                    if (count > maxVotes) {
+                        maxVotes = count;
+                        topTargets = [players.find(p => p.id === id)].filter(Boolean);
+                    } else if (count === maxVotes) {
+                        const target = players.find(p => p.id === id);
+                        if (target) topTargets.push(target);
+                    }
+                });
+                return { voteCount, maxVotes, topTargets };
+            };
+
+            const getRoleCountsSummary = (game) => {
+                const g = game || werewolfGameRef.current;
+                if (!g?.players?.length) return '';
+                const counts = g.players.reduce((acc, p) => {
+                    acc[p.role] = (acc[p.role] || 0) + 1;
+                    return acc;
+                }, {});
+                const wolfCount = counts.wolf || 0;
+                const villagerCount = counts.villager || 0;
+                const specialRoles = Object.entries(counts).filter(([role]) => !['wolf', 'villager'].includes(role));
+                const specialText = specialRoles.length
+                    ? specialRoles.map(([role, count]) => `${WEREWOLF_ROLES?.[role]?.name || role}×${count}`).join('、')
+                    : '无';
+                return `本局角色配置：狼人 ${wolfCount} 人；神职：${specialText}；村民 ${villagerCount} 人。`;
+            };
+
+            const areAllVotesIn = (game) => {
+                const voters = game.players.filter(p => p.alive && p.canVote);
+                return voters.every(p => (p.isHuman ? game.votes?.player : game.votes?.[p.id]));
+            };
+
+            const getMentionedTarget = (text, targets) => {
+                if (!text || !targets?.length) return null;
+                const sorted = [...targets].sort((a, b) => (b.name?.length || 0) - (a.name?.length || 0));
+                return sorted.find(t => text.includes(`@${t.name}`) || text.includes(t.name)) || null;
+            };
+
+            const parseVoteDecision = (rawText, candidates) => {
+                if (!rawText) return null;
+                const parsed = parseJSONFromText(rawText);
+                const targetName = parsed?.target_name || parsed?.target || parsed?.name;
+                if (targetName) {
+                    return candidates.find(c => c.name === targetName) || getMentionedTarget(targetName, candidates);
+                }
+                return getMentionedTarget(rawText.trim(), candidates);
+            };
+
+            const getMostMentionedTarget = (history, candidates) => {
+                if (!history?.length || !candidates?.length) return null;
+                const usableHistory = history.filter(m => !m?.isSystem && m?.role !== 'system');
+                const counts = new Map();
+                candidates.forEach(c => counts.set(c.id, 0));
+                usableHistory.forEach(m => {
+                    const target = getMentionedTarget(m.content || '', candidates);
+                    if (target) counts.set(target.id, (counts.get(target.id) || 0) + 1);
+                });
+                let best = null;
+                let max = 0;
+                counts.forEach((count, id) => {
+                    if (count > max) {
+                        max = count;
+                        best = candidates.find(c => c.id === id);
+                    }
+                });
+                return best;
+            };
+
+            const callLLMOnce = (messages, config) => new Promise(resolve => {
+                let full = '';
+                callLLM(
+                    messages,
+                    config,
+                    (chunk) => { full += chunk; },
+                    () => resolve(full),
+                    () => resolve('')
+                );
+            });
+
+            const decideAIVote = async (agent, playerRole, history, candidates, room, phaseLabel) => {
+                const config = configs.find(c => c.id === agent.configId);
+                const prompt = prompts.find(p => p.id === agent.promptId);
+                if (!config || !prompt) return null;
+
+                const effectiveConfig = { ...config, model: agent.model || config.model };
+                const candidateNames = candidates.map(c => c.name).join('、');
+                const rolePrompt = werewolfRolePrompts[playerRole] || '';
+                const roleSummary = getRoleCountsSummary(werewolfGameRef.current);
+                const system = `${prompt.content}\n${rolePrompt}\n${roleSummary}\n你正在玩狼人杀。现在是${phaseLabel}，请根据上下文决定投票目标。可选目标：${candidateNames}。\n仅返回JSON：{"target_name":"名字","reason":"理由"}`;
+
+                const contextMessages = history.slice(-contextWindowSize).map(m => ({
+                    role: m.role === 'user' ? 'user' : 'assistant',
+                    content: `${m.senderName ? m.senderName + ': ' : ''}${m.content}`
+                }));
+
+                const raw = await callLLMOnce([{ role: 'system', content: system }, ...contextMessages], effectiveConfig);
+                return parseVoteDecision(raw, candidates);
+            };
+
+            const triggerAgentSequence = async (agentList, history, reason, room) => {
+                let currentHistory = [...history];
+                for (const agent of agentList) {
+                    if (speakingLockRef.current) return;
+                    const responseText = await triggerAgentResponse(agent, currentHistory, reason, room);
+                    currentHistory = [...currentHistory, { id: Date.now(), role: 'assistant', senderId: agent.id, senderName: agent.name, content: responseText, room, time: formatTime(Date.now()) }];
+                }
+            };
+
+            const parseDirectorDecision = (rawText) => parseJSONFromText(rawText);
+
+            const runDirectorCycle = async (history) => {
+                if (activeSpeakerId || speakingLockRef.current) return;
+
+                const directorConfig = configs.find(c => c.id === directorConfigId);
+                const enabledAgents = getEnabledAgents();
+                if (enabledAgents.length === 0) return;
+
+                if (directorMode === 'default') {
+                    const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+                    if (hasMentionAll(lastUserMsg?.content)) {
+                        await triggerAgentSequence(enabledAgents, history, '被@所有人点名', 'main');
+                        return;
+                    }
+                    const mentionedAgent = findMentionedAgent(lastUserMsg?.content, enabledAgents);
+                    if (mentionedAgent) {
+                        triggerAgentResponse(mentionedAgent, history, '被@点名', 'main');
+                        return;
+                    }
+
+                    if (autoPlayRef.current) {
+                        const roomHistory = messagesRef.current;
+                        const nextAgent = getNextAgentByOrder(enabledAgents, roomHistory);
+                        if (nextAgent) triggerAgentResponse(nextAgent, roomHistory, '顺序互怼', 'main');
+                    }
+                    return;
+                }
+
+                if (!directorConfig?.apiKey) {
+                    addToast("导演配置无效或缺少Key", "error");
+                    setIsAutoPlay(false);
+                    return;
+                }
+
+                setDirectorStatus('thinking');
+
+                const agentDescriptions = enabledAgents.map(a => {
+                    const prompt = prompts.find(p => p.id === a.promptId);
+                    return `- ID: ${a.id}, 名字: ${a.name}, 人设: ${prompt ? prompt.content.substring(0, 100) : '未知'}`;
+                }).join('\n');
+
+                const finalDirectorPrompt = directorRule.replace('{agent_descriptions}', agentDescriptions);
+
+                const contextMsgs = getCombinedContextMessages();
+
+                try {
+                    let fullResponse = "";
+                    await callLLM(
+                        [{ role: "system", content: finalDirectorPrompt }, ...contextMsgs],
+                        directorConfig,
+                        (chunk) => fullResponse += chunk,
+                        () => {
+                            setDirectorStatus(null);
+                            const decision = parseDirectorDecision(fullResponse);
+                            if (decision?.next_speaker_id) {
+                                const agent = agents.find(a => a.id === decision.next_speaker_id && a.enabled);
+                                if (agent) triggerAgentResponse(agent, history, decision.reason || '导演调度', 'main');
+                                return;
+                            }
+                            if (autoPlayRef.current) {
+                                const fallbackAgent = getNextAgentByOrder(enabledAgents, history);
+                                if (fallbackAgent) {
+                                    addToast("导演解析失败，改用顺序模式", "error");
+                                    triggerAgentResponse(fallbackAgent, history, '解析失败回退', 'main');
+                                }
+                            } else {
+                                setIsAutoPlay(false);
+                            }
+                        },
+                        (err) => { addToast(`导演出错: ${err}`, 'error'); setDirectorStatus(null); }
+                    );
+                } catch (e) { setDirectorStatus(null); }
+
+            };
+
+            const runSmallGroupCycle = async (history) => {
+                if (activeSpeakerId || speakingLockRef.current) return;
+                const enabledAgents = getSmallGroupAgents();
+                if (enabledAgents.length === 0) return;
+
+                if (directorMode === 'default') {
+                    const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+                    if (hasMentionAll(lastUserMsg?.content)) {
+                        await triggerAgentSequence(enabledAgents, history, '被@所有人点名', 'small');
+                        return;
+                    }
+                    const mentionedAgent = findMentionedAgent(lastUserMsg?.content, enabledAgents);
+                    if (mentionedAgent) {
+                        triggerAgentResponse(mentionedAgent, history, '被@点名', 'small');
+                        return;
+                    }
+                    if (autoPlayRef.current) {
+                        const roomHistory = smallGroupMessagesRef.current;
+                        const nextAgent = getNextAgentByOrder(enabledAgents, roomHistory);
+                        if (nextAgent) triggerAgentResponse(nextAgent, roomHistory, '顺序互怼', 'small');
+                    }
+                    return;
+                }
+
+                const directorConfig = configs.find(c => c.id === directorConfigId);
+                if (!directorConfig?.apiKey) {
+                    addToast("导演配置无效或缺少Key", "error");
+                    setIsAutoPlay(false);
+                    return;
+                }
+
+                setDirectorStatus('thinking');
+                const agentDescriptions = enabledAgents.map(a => {
+                    const prompt = prompts.find(p => p.id === a.promptId);
+                    return `- ID: ${a.id}, 名字: ${a.name}, 人设: ${prompt ? prompt.content.substring(0, 100) : '未知'}`;
+                }).join('\n');
+
+                const finalDirectorPrompt = directorRule.replace('{agent_descriptions}', agentDescriptions);
+                const contextMsgs = getCombinedContextMessages();
+
+                try {
+                    let fullResponse = "";
+                    await callLLM(
+                        [{ role: "system", content: finalDirectorPrompt }, ...contextMsgs],
+                        directorConfig,
+                        (chunk) => fullResponse += chunk,
+                        () => {
+                            setDirectorStatus(null);
+                            const decision = parseDirectorDecision(fullResponse);
+                            if (decision?.next_speaker_id) {
+                                const agent = enabledAgents.find(a => a.id === decision.next_speaker_id);
+                                if (agent) triggerAgentResponse(agent, history, decision.reason || '导演调度', 'small');
+                                return;
+                            }
+                            if (autoPlayRef.current) {
+                                const fallbackAgent = getNextAgentByOrder(enabledAgents, history);
+                                if (fallbackAgent) {
+                                    addToast("导演解析失败，改用顺序模式", "error");
+                                    triggerAgentResponse(fallbackAgent, history, '解析失败回退', 'small');
+                                }
+                            } else {
+                                setIsAutoPlay(false);
+                            }
+                        },
+                        (err) => { addToast(`导演出错: ${err}`, 'error'); setDirectorStatus(null); }
+                    );
+                } catch (e) { setDirectorStatus(null); }
+            };
+
+            const triggerAgentResponse = async (agent, history, reason, room = 'main') => {
+                const config = configs.find(c => c.id === agent.configId);
+                const prompt = prompts.find(p => p.id === agent.promptId);
+
+                if (!config || !prompt) return addToast(`${agent.name} 配置不完整`, 'error');
+                if (directorMode === 'werewolf' && werewolfGameRef.current?.paused) return '';
+
+                if (speakingLockRef.current) return '';
+                speakingLockRef.current = true;
+                setActiveSpeakerId(agent.id);
+
+                const shouldShareContext = smallGroupMembers.includes(agent.id);
+                const contextBase = shouldShareContext ? mergeHistories(messagesRef.current, smallGroupMessagesRef.current) : history;
+                const contextMessages = contextBase.slice(-contextWindowSize).map(m => ({
+                    role: m.role === 'user' ? 'user' : (m.senderId === agent.id ? 'assistant' : 'user'),
+                    content: `${m.room === 'small' ? '[小群] ' : '[大群] '}${m.senderId && m.senderId !== agent.id ? `[${m.senderName}]: ${m.content}` : m.content}`
+                }));
+
+                const systemMsg = { role: 'system', content: `${prompt.content}\n\n(当前情境: ${reason || '轮到你发言'})` };
+
+                const effectiveConfig = { ...config, model: agent.model || config.model };
+
+                const newMsgId = Date.now();
+                const setRoomMessages = room === 'small' ? setSmallGroupMessages : setMessages;
+                setRoomMessages(prev => [...prev, { id: newMsgId, role: 'assistant', senderId: agent.id, senderName: agent.name, avatarColor: agent.avatarColor, content: '', isThinking: true, room, time: formatTime(Date.now()) }]);
+
+                let responseText = "";
+                await callLLM(
+                    [systemMsg, ...contextMessages],
+                    effectiveConfig,
+                    (chunk) => {
+                        responseText += chunk;
+                        setRoomMessages(prev => prev.map(m => m.id === newMsgId ? { ...m, content: responseText, isThinking: false } : m));
+                    },
+                    () => {
+                        setActiveSpeakerId(null);
+                        speakingLockRef.current = false;
+                        if (autoPlayRef.current) {
+                            autoPlayTimeoutRef.current = setTimeout(() => {
+                                if (autoPlayRef.current) {
+                                    const nextHistory = [...history, { role: 'assistant', senderId: agent.id, senderName: agent.name, content: responseText, room, time: formatTime(Date.now()) }];
+                                    if (room === 'small') runSmallGroupCycle(nextHistory);
+                                    else runDirectorCycle(nextHistory);
+                                }
+                            }, 2000);
+                        }
+                    },
+                    (err) => { setActiveSpeakerId(null); speakingLockRef.current = false; addToast(`发言失败: ${err}`, 'error'); }
+                );
+                return responseText;
+            };
+
+            const handleUserSend = () => {
+                if (!input.trim()) return;
+
+                if (directorMode === 'werewolf' && werewolfGame) {
+                    const handled = handleWerewolfPlayerAction(input, 'main');
+                    if (!handled) {
+                        const newMsg = createUserMsg(input, 'main');
+                        setMessages(prev => [...prev, newMsg]);
+                    }
+                    setInput('');
+                    return;
+                }
+
+                const newMsg = createUserMsg(input, 'main');
+                const newHistory = [...messages, newMsg];
+                setMessages(newHistory);
+                setInput('');
+                setTimeout(() => runDirectorCycle(newHistory), 500);
+            };
+
+            const handleSmallGroupSend = () => {
+                if (!smallGroupInput.trim()) return;
+                if (directorMode === 'werewolf' && werewolfGame) {
+                    const handled = handleWerewolfPlayerAction(smallGroupInput, 'small');
+                    if (handled) {
+                        setSmallGroupInput('');
+                        return;
+                    }
+                }
+                const newMsg = createUserMsg(smallGroupInput, 'small');
+                const newHistory = [...smallGroupMessages, newMsg];
+                setSmallGroupMessages(newHistory);
+                setSmallGroupInput('');
+                setTimeout(() => runSmallGroupCycle(newHistory), 500);
+            };
+
+            const quickAt = (name, room) => {
+                const token = `@${name} `;
+                if (room === 'small') setSmallGroupInput(prev => (prev || '') + token);
+                else setInput(prev => (prev || '') + token);
+            };
+
+            const toggleSmallGroupMember = (agentId) => {
+                setSmallGroupMembers(prev => prev.includes(agentId) ? prev.filter(id => id !== agentId) : [...prev, agentId]);
+            };
+
+            const handleSaveAgent = (updated) => {
+                setAgents(prev => {
+                    const exists = prev.find(a => a.id === updated.id);
+                    if (exists) return prev.map(a => a.id === updated.id ? updated : a);
+                    return [...prev, updated];
+                });
+            };
+
+            const handleDeleteAgent = (id) => {
+                setAgents(prev => prev.filter(a => a.id !== id));
+                setShowAgentModal(false);
+            };
+
+            // ========== 狼人杀游戏逻辑 ==========
+            const WEREWOLF_ROLES = {
+                wolf: { name: '狼人', emoji: '🐺', team: 'wolf', desc: '每晚可以杀死一名玩家' },
+                villager: { name: '村民', emoji: '👨‍🌾', team: 'village', desc: '没有特殊能力，依靠投票找出狼人' },
+                seer: { name: '预言家', emoji: '🔮', team: 'village', desc: '每晚可以查验一名玩家的身份' },
+                witch: { name: '女巫', emoji: '🧙‍♀️', team: 'village', desc: '有一瓶解药和一瓶毒药' },
+                hunter: { name: '猎人', emoji: '🏹', team: 'village', desc: '死亡时可以带走一名玩家' },
+                guard: { name: '守卫', emoji: '🛡️', team: 'village', desc: '每晚可以守护一名玩家' },
+                idiot: { name: '白痴', emoji: '🤪', team: 'village', desc: '被投票出局后可以翻牌免死，但失去投票权' }
+            };
+
+            const startWerewolfGame = () => {
+                const enabledAgents = getEnabledAgents();
+                const totalPlayers = werewolfConfig.playerJoin ? enabledAgents.length + 1 : enabledAgents.length;
+
+                if (totalPlayers < 4) {
+                    addToast('至少需要4名玩家才能开始游戏', 'error');
+                    return;
+                }
+
+                const roles = [];
+                for (let i = 0; i < werewolfConfig.wolfCount; i++) roles.push('wolf');
+                werewolfConfig.roles.forEach(r => roles.push(r));
+                while (roles.length < totalPlayers) roles.push('villager');
+                while (roles.length > totalPlayers) roles.pop();
+
+                const shuffledRoles = [...roles].sort(() => Math.random() - 0.5);
+
+                const players = [];
+                let roleIndex = 0;
+
+                if (werewolfConfig.playerJoin) {
+                    players.push({
+                        id: 'player',
+                        name: werewolfConfig.playerName || '玩家',
+                        role: shuffledRoles[roleIndex++],
+                        isHuman: true,
+                        alive: true,
+                        canVote: true
+                    });
+                }
+
+                enabledAgents.forEach(agent => {
+                    players.push({
+                        id: agent.id,
+                        name: agent.name,
+                        role: shuffledRoles[roleIndex++],
+                        isHuman: false,
+                        alive: true,
+                        canVote: true,
+                        avatarColor: agent.avatarColor
+                    });
+                });
+
+                const wolfIds = players.filter(p => p.role === 'wolf' && !p.isHuman).map(p => p.id);
+                const humanWolf = players.find(p => p.role === 'wolf' && p.isHuman);
+                setSmallGroupMembers(humanWolf ? [...wolfIds, 'player'] : wolfIds);
+
+                const gameState = {
+                    phase: 'night',
+                    day: 1,
+                    players,
+                    currentSpeaker: 0,
+                    dayStartIndex: 0,
+                    daySpeechOrder: [],
+                    daySpeechPos: 0,
+                    nightActions: {},
+                    witchPotion: { heal: true, poison: true },
+                    lastGuarded: null,
+                    deadTonight: [],
+                    voteTarget: null,
+                    gameLog: [],
+                    paused: false,
+                    seerResult: {},
+                    idiotRevealed: false,
+                    deathLog: {},
+                    lastWordsQueue: [],
+                    awaitingLastWords: null,
+                    pendingPostLastWords: null,
+                    awaitingGuard: false,
+                    awaitingSeer: false,
+                    pendingHunterShot: null,
+                    awaitingWitch: false,
+                    awaitingWolf: false,
+                    awaitingDaySpeech: null,
+                    nightStage: 'guard'
+                };
+
+                setWerewolfGame(gameState);
+                setShowWerewolfSetup(false);
+                clearChat('all', { confirm: false, pauseGame: false, toast: false });
+
+                const playerRole = players.find(p => p.isHuman);
+                const roleInfo = playerRole ? WEREWOLF_ROLES[playerRole.role] : null;
+
+                let startMsg = `🐺 **狼人杀游戏开始！** 🐺\n\n`;
+                startMsg += `本局共 ${totalPlayers} 名玩家，${werewolfConfig.wolfCount} 只狼人。\n\n`;
+                startMsg += `**玩家列表：**\n`;
+                players.forEach((p, i) => {
+                    startMsg += `${i + 1}. ${p.name}${p.isHuman ? ' (你)' : ''}\n`;
+                });
+
+                if (playerRole) {
+                    startMsg += `\n---\n\n🎭 **你的身份是：${roleInfo.emoji} ${roleInfo.name}**\n`;
+                    startMsg += `> ${roleInfo.desc}\n`;
+                    if (playerRole.role === 'wolf') {
+                        const teammates = players.filter(p => p.role === 'wolf' && p.id !== 'player');
+                        if (teammates.length > 0) {
+                            startMsg += `\n你的狼队友：${teammates.map(t => t.name).join('、')}\n`;
+                            startMsg += `（小群是狼人私聊频道）`;
+                        }
+                    }
+                }
+
+                startMsg += `\n\n---\n\n🌙 **第 1 夜降临，请闭眼...**`;
+
+                setMessages([{ id: Date.now(), role: 'system', content: startMsg, room: 'main', time: formatTime(Date.now()), isSystem: true }]);
+
+                if (wolfIds.length > 0) {
+                    const wolfNames = players.filter(p => p.role === 'wolf').map(p => p.name);
+                    setSmallGroupMessages([{
+                        id: Date.now() + 1,
+                        role: 'system',
+                        content: `🐺 **狼人频道**\n\n狼队成员：${wolfNames.join('、')}\n\n请在这里讨论今晚要杀谁。`,
+                        room: 'small',
+                        time: formatTime(Date.now()),
+                        isSystem: true
+                    }]);
+                }
+
+                setTimeout(() => runWerewolfNight(gameState), 2000);
+            };
+
+            const NIGHT_PHASES = ['guard', 'wolf', 'witch', 'seer', 'resolve'];
+            const getNextNightStage = (stage) => {
+                const idx = NIGHT_PHASES.indexOf(stage || 'guard');
+                return NIGHT_PHASES[Math.min(idx + 1, NIGHT_PHASES.length - 1)] || 'resolve';
+            };
+
+            const chooseGuardTarget = (game, candidates) => {
+                const seer = game.players.find(p => p.alive && p.role === 'seer');
+                const mostMentioned = getMostMentionedTarget(messagesRef.current, candidates);
+                if (seer && candidates.some(c => c.id === seer.id) && Math.random() < 0.5) return seer;
+                return mostMentioned || candidates[Math.floor(Math.random() * candidates.length)];
+            };
+
+            const chooseSeerTarget = (game, candidates) => {
+                const mostMentioned = getMostMentionedTarget(messagesRef.current, candidates);
+                return mostMentioned || candidates[Math.floor(Math.random() * candidates.length)];
+            };
+
+            const shouldWitchHeal = (game, target) => {
+                if (!target) return false;
+                const important = ['seer', 'guard', 'witch', 'hunter'];
+                const isImportant = important.includes(target.role);
+                const mostMentioned = getMostMentionedTarget(messagesRef.current, [target]);
+                if (isImportant) return true;
+                if (mostMentioned) return true;
+                return Math.random() < 0.35;
+            };
+
+            const chooseWitchPoisonTarget = (game, candidates) => {
+                const mostMentioned = getMostMentionedTarget(messagesRef.current, candidates);
+                return mostMentioned || (Math.random() < 0.4 ? candidates[Math.floor(Math.random() * candidates.length)] : null);
+            };
+
+            const advanceNightStage = (game, nextStage) => {
+                game.nightStage = nextStage || getNextNightStage(game.nightStage);
+                setWerewolfGame({ ...game });
+                setTimeout(() => runWerewolfNight(game), 300);
+            };
+
+            const runGuardPhase = async (game) => {
+                const guard = game.players.find(p => p.role === 'guard' && p.alive);
+                if (!guard || game.nightActions.guardProtect) return advanceNightStage(game, 'wolf');
+                const guardTargets = game.players.filter(p => p.alive && p.id !== game.lastGuarded);
+                if (!guardTargets.length) return advanceNightStage(game, 'wolf');
+
+                if (guard.isHuman) {
+                    if (game.awaitingGuard) return;
+                    game.awaitingGuard = true;
+                    setWerewolfGame({ ...game });
+                    setMessages(prev => [...prev, createSystemMsg(`🛡️ 你是守卫，请输入"守护 @玩家名"选择今晚守护的目标（不能连续守护同一人），或输入"跳过"不守护。`)]);
+                    return;
+                }
+
+                const target = chooseGuardTarget(game, guardTargets);
+                if (target) {
+                    game.nightActions.guardProtect = target.id;
+                    game.lastGuarded = target.id;
+                }
+                advanceNightStage(game, 'wolf');
+            };
+
+            const runWolfPhase = async (game) => {
+                if (game.nightActions.wolfKill) return advanceNightStage(game, 'witch');
+                const wolves = game.players.filter(p => p.role === 'wolf' && p.alive);
+                const aliveTargets = game.players.filter(p => p.alive);
+                if (!wolves.length || !aliveTargets.length) {
+                    game.nightActions.wolfKill = null;
+                    return advanceNightStage(game, 'witch');
+                }
+
+                game.nightActions.wolfVotes = game.nightActions.wolfVotes || {};
+
+                if (!game.nightActions.wolfDiscussed) {
+                    const aiWolves = wolves.filter(w => !w.isHuman);
+                    for (const wolf of aiWolves) {
+                        const agent = agents.find(a => a.id === wolf.id);
+                        if (!agent) continue;
+                        const targetNames = aliveTargets.map(t => t.name).join('、');
+                        const roleSummary = getRoleCountsSummary(game);
+                        const replyText = await triggerAgentResponse(
+                            agent,
+                            smallGroupMessagesRef.current,
+                            `你是狼人，现在是夜晚，你需要和狼队友讨论今晚杀谁。${roleSummary}\n存活的非狼人玩家有：${targetNames}。请简短讨论并说出你想杀的目标。`,
+                            'small'
+                        );
+                        const target = getMentionedTarget(replyText, aliveTargets);
+                        if (target) game.nightActions.wolfVotes[wolf.id] = target.id;
+                        await new Promise(r => setTimeout(r, 1200));
+                    }
+                    game.nightActions.wolfDiscussed = true;
+                }
+
+                const humanWolf = wolves.find(w => w.isHuman);
+                if (humanWolf && !game.nightActions.wolfVotes['player']) {
+                    if (game.awaitingWolf) return;
+                    game.awaitingWolf = true;
+                    setWerewolfGame({ ...game });
+                    setMessages(prev => [...prev, createSystemMsg(`🐺 你是狼人，请到狼人密聊里输入“击杀 @玩家名”或“投票 @玩家名”。`)]);
+                    setSmallGroupMessages(prev => [...prev, createSystemMsg(`🐺 玩家狼人请在这里输入击杀指令，我们将据此统计狼队投票。`, 'small')]);
+                    return;
+                }
+
+                const aiWolves = wolves.filter(w => !w.isHuman);
+                for (const wolf of aiWolves) {
+                    if (game.nightActions.wolfVotes[wolf.id]) continue;
+                    const agent = agents.find(a => a.id === wolf.id);
+                    if (!agent) continue;
+                    const decision = await decideAIVote(
+                        agent,
+                        'wolf',
+                        smallGroupMessagesRef.current,
+                        aliveTargets,
+                        'small',
+                        '夜晚击杀投票'
+                    );
+                    if (decision) game.nightActions.wolfVotes[wolf.id] = decision.id;
+                    await new Promise(r => setTimeout(r, 600));
+                }
+
+                const { voteCount, topTargets } = tallyVotes(game.nightActions.wolfVotes, aliveTargets);
+                let finalTarget = topTargets[0];
+                if (!finalTarget) {
+                    finalTarget = getMostMentionedTarget(smallGroupMessagesRef.current, aliveTargets) || aliveTargets[0];
+                }
+                game.nightActions.wolfKill = finalTarget?.id || null;
+
+                const voteLines = Object.entries(game.nightActions.wolfVotes || {}).map(([voterId, targetId]) => {
+                    const voter = game.players.find(p => p.id === voterId || (voterId === 'player' && p.isHuman));
+                    const target = aliveTargets.find(t => t.id === targetId);
+                    return `- ${voter?.name || voterId} → ${target?.name || targetId}`;
+                }).join('\n');
+                const countLines = Object.entries(voteCount).map(([targetId, count]) => {
+                    const target = aliveTargets.find(t => t.id === targetId);
+                    return `- ${target?.name || targetId}: ${count} 票`;
+                }).join('\n');
+
+                const wolfNames = wolves.map(w => w.name).join('、');
+                setSmallGroupMessages(prev => [...prev, createSystemMsg(
+                    `🗳️ **狼人投票总结**\n\n参与狼人：${wolfNames}\n\n**投票记录**\n${voteLines || '（无明确投票）'}\n\n**票数统计**\n${countLines || '（无统计）'}\n\n最终决定击杀：**${finalTarget?.name || '无人'}**`,
+                    'small'
+                )]);
+
+                advanceNightStage(game, 'witch');
+            };
+
+            const runWitchPhase = async (game) => {
+                const witch = game.players.find(p => p.role === 'witch' && p.alive);
+                if (!witch || (!game.witchPotion.heal && !game.witchPotion.poison)) return advanceNightStage(game, 'seer');
+                if (game.nightActions.witchActed || game.nightActions.witchHeal || game.nightActions.witchPoison) {
+                    return advanceNightStage(game, 'seer');
+                }
+
+                const witchIsTarget = game.nightActions.wolfKill === witch.id;
+                const canSelfSave = werewolfConfig.witchSelfSave;
+                const canUseHeal = game.witchPotion.heal && game.nightActions.wolfKill && (!witchIsTarget || canSelfSave);
+
+                if (witch.isHuman) {
+                    if (game.awaitingWitch) return;
+                    game.awaitingWitch = true;
+                    setWerewolfGame({ ...game });
+                    const wolfTarget = game.players.find(p => p.id === game.nightActions.wolfKill);
+                    const wolfInfo = wolfTarget ? `今晚狼人袭击的是：**${wolfTarget.name}**。` : '今晚无人被狼人袭击。';
+                    setMessages(prev => [...prev, createSystemMsg(`🧙‍♀️ 你是女巫。${wolfInfo}\n可输入“救 @玩家名”或“毒 @玩家名”，或输入“跳过”。`)]);
+                    return;
+                }
+
+                if (canUseHeal) {
+                    const target = game.players.find(p => p.id === game.nightActions.wolfKill);
+                    if (shouldWitchHeal(game, target)) {
+                        game.nightActions.witchHeal = target?.id;
+                        game.witchPotion.heal = false;
+                        return advanceNightStage(game, 'seer');
+                    }
+                }
+
+                if (game.witchPotion.poison) {
+                    const poisonTargets = game.players.filter(p => p.alive && p.id !== witch.id);
+                    const poisonTarget = chooseWitchPoisonTarget(game, poisonTargets);
+                    if (poisonTarget) {
+                        game.nightActions.witchPoison = poisonTarget.id;
+                        game.witchPotion.poison = false;
+                    }
+                }
+
+                advanceNightStage(game, 'seer');
+            };
+
+            const runSeerPhase = async (game) => {
+                const seer = game.players.find(p => p.role === 'seer' && p.alive);
+                if (!seer || game.nightActions.seerCheck) return advanceNightStage(game, 'resolve');
+                const targets = game.players.filter(p => p.alive && p.id !== seer.id);
+                if (!targets.length) return advanceNightStage(game, 'resolve');
+
+                if (seer.isHuman) {
+                    if (game.awaitingSeer) return;
+                    game.awaitingSeer = true;
+                    setWerewolfGame({ ...game });
+                    setMessages(prev => [...prev, createSystemMsg(`🔮 你是预言家，请输入"查验 @玩家名"选择今晚查验的目标。`)]);
+                    return;
+                }
+
+                const checked = chooseSeerTarget(game, targets);
+                const result = checked.role === 'wolf' ? '狼人' : '好人';
+                game.seerResult[seer.id] = { targetId: checked.id, targetName: checked.name, result, day: game.day };
+                game.nightActions.seerCheck = checked.id;
+                advanceNightStage(game, 'resolve');
+            };
+
+            const runWerewolfNight = async (game) => {
+                if (!game || game.phase !== 'night' || isGamePaused(game)) return;
+                const stage = game.nightStage || 'guard';
+                if (stage === 'guard') return runGuardPhase(game);
+                if (stage === 'wolf') return runWolfPhase(game);
+                if (stage === 'witch') return runWitchPhase(game);
+                if (stage === 'seer') return runSeerPhase(game);
+                if (stage === 'resolve') return transitionToDay(game);
+            };
+
+            const transitionToDay = (game) => {
+                if (isGamePaused(game)) return;
+
+                let killed = game.nightActions.wolfKill ? game.players.find(p => p.id === game.nightActions.wolfKill) : null;
+
+                if (game.nightActions.guardProtect && killed && killed.id === game.nightActions.guardProtect) {
+                    killed = null;
+                }
+
+                if (game.nightActions.witchHeal && killed && killed.id === game.nightActions.witchHeal) {
+                    killed = null;
+                }
+
+                const poisoned = game.nightActions.witchPoison ? game.players.find(p => p.id === game.nightActions.witchPoison) : null;
+
+                let hunterKilledByWolf = null;
+                if (killed && killed.role === 'hunter') {
+                    hunterKilledByWolf = killed;
+                    killed.alive = false;
+                    setDeathLog(game, killed.id, `第${game.day}夜`, '狼刀');
+                    const roleInfo = WEREWOLF_ROLES[killed.role];
+                    setMessages(prev => [...prev, {
+                        id: Date.now(),
+                        role: 'system',
+                        content: `☀️ **第 ${game.day} 天**\n\n昨晚，**${killed.name}** 被狼人杀害了！\n他的身份是：${roleInfo.emoji} ${roleInfo.name}`,
+                        room: 'main',
+                        time: formatTime(Date.now()),
+                        isSystem: true
+                    }]);
+
+                    if (killed.isHuman) {
+                        game.pendingHunterShot = 'player';
+                        game.phase = 'day';
+                        game.nightActions = {};
+                        game.awaitingGuard = false;
+                        game.awaitingSeer = false;
+                        game.awaitingWitch = false;
+                        game.awaitingWolf = false;
+                        game.nightStage = 'guard';
+                        setMessages(prev => [...prev, {
+                            id: Date.now() + 1,
+                            role: 'system',
+                            content: `🏹 你是猎人，请输入"开枪 @玩家名"选择带走目标，或输入"不开枪"放弃。`,
+                            room: 'main',
+                            time: formatTime(Date.now()),
+                            isSystem: true
+                        }]);
+                        setWerewolfGame({ ...game });
+                        return;
+                    } else {
+                        const hunterTargets = game.players.filter(p => p.alive && p.id !== killed.id);
+                        const target = hunterTargets[Math.floor(Math.random() * hunterTargets.length)];
+                        if (target) {
+                            target.alive = false;
+                            setDeathLog(game, target.id, `第${game.day}天`, '枪杀');
+                            const targetRole = WEREWOLF_ROLES[target.role];
+                            setMessages(prev => [...prev, {
+                                id: Date.now() + 2,
+                                role: 'system',
+                                content: `🏹 **${killed.name}** 发动猎人技能，带走了 **${target.name}**！\n${target.name} 的身份是：${targetRole.emoji} ${targetRole.name}`,
+                                room: 'main',
+                                time: formatTime(Date.now()),
+                                isSystem: true
+                            }]);
+                        }
+                    }
+                    killed = null;
+                } else if (killed) {
+                    killed.alive = false;
+                    setDeathLog(game, killed.id, `第${game.day}夜`, '狼刀');
+                    const roleInfo = WEREWOLF_ROLES[killed.role];
+                    const dayMsg = `☀️ **第 ${game.day} 天**\n\n昨晚，**${killed.name}** 被狼人杀害了！\n他的身份是：${roleInfo.emoji} ${roleInfo.name}\n\n请按顺序发言，讨论谁是狼人。`;
+                    setMessages(prev => [...prev, createSystemMsg(dayMsg)]);
+                } else {
+                    setMessages(prev => [...prev, createSystemMsg(`☀️ **第 ${game.day} 天**\n\n昨晚是平安夜，无人死亡。\n\n请按顺序发言，讨论谁是狼人。`)]);
+                }
+
+                if (poisoned) {
+                    poisoned.alive = false;
+                    setDeathLog(game, poisoned.id, `第${game.day}夜`, '毒死');
+                    const roleInfo = WEREWOLF_ROLES[poisoned.role];
+                    setMessages(prev => [...prev, createSystemMsg(`🧪 **${poisoned.name}** 被女巫毒死了！\n身份揭晓：${roleInfo.emoji} ${roleInfo.name}`)]);
+                }
+
+                game.phase = 'day';
+                game.currentSpeaker = 0;
+                game.nightActions = {};
+                game.awaitingWitch = false;
+                game.awaitingGuard = false;
+                game.awaitingSeer = false;
+                game.awaitingWolf = false;
+                game.awaitingDaySpeech = null;
+                game.nightStage = 'guard';
+
+                const startSeatId = killed?.id || poisoned?.id || game.players[0]?.id;
+                const startIndex = Math.max(0, game.players.findIndex(p => p.id === startSeatId));
+                game.dayStartIndex = startIndex;
+                const order = [];
+                for (let i = 0; i < game.players.length; i++) {
+                    const idx = (startIndex + i) % game.players.length;
+                    const player = game.players[idx];
+                    if (player?.alive) order.push(player.id);
+                }
+                game.daySpeechOrder = order;
+                game.daySpeechPos = 0;
+
+                setWerewolfGame({ ...game });
+
+                if (checkWerewolfWin(game)) return;
+
+                setTimeout(() => runWerewolfDaySpeech(game), 2000);
+            };
+
+            const runWerewolfDaySpeech = async (game) => {
+                if (!game || game.phase !== 'day' || isGamePaused(game)) return;
+
+                const alivePlayers = game.players.filter(p => p.alive);
+                if (!alivePlayers.length) return;
+
+                const orderIds = (game.daySpeechOrder && game.daySpeechOrder.length)
+                    ? game.daySpeechOrder
+                    : alivePlayers.map(p => p.id);
+
+                while (game.daySpeechPos < orderIds.length) {
+                    if (isGamePaused(game)) return;
+                    const player = game.players.find(p => p.id === orderIds[game.daySpeechPos]);
+                    if (!player || !player.alive) {
+                        game.daySpeechPos += 1;
+                        continue;
+                    }
+
+                    if (player.isHuman) {
+                        if (game.awaitingDaySpeech) return;
+                        game.awaitingDaySpeech = player.id;
+                        setWerewolfGame({ ...game });
+                        setMessages(prev => [...prev, createSystemMsg(`📢 轮到 **${player.name}** (你) 发言，请在下方输入你的发言。`)]);
+                        return;
+                    }
+
+                    const agent = agents.find(a => a.id === player.id);
+                    if (agent) {
+                        const roleInfo = WEREWOLF_ROLES[player.role];
+                        const aliveNames = alivePlayers.filter(p => p.id !== player.id).map(p => p.name).join('、');
+                        let context = `${werewolfRolePrompts[player.role] || ''}\n你正在玩狼人杀游戏，你的身份是${roleInfo.name}。${getRoleCountsSummary(game)}`;
+                        if (player.role === 'seer' && game.seerResult?.[player.id]) {
+                            const res = game.seerResult[player.id];
+                            const target = game.players.find(p => p.id === res.targetId);
+                            context += `\n你昨晚查验了${target?.name || '某人'}，结果是${res.result}。`;
+                        }
+                        if (player.role === 'wolf') context += `你需要隐藏身份，假装是好人，并尝试误导其他人。`;
+                        else context += `你需要通过逻辑分析找出狼人。`;
+                        context += `存活玩家：${aliveNames}。请发表你的看法，简短有逻辑，可以指出你怀疑的人。`;
+
+                        await triggerAgentResponse(agent, messagesRef.current, context, 'main');
+                        game.daySpeechPos += 1;
+                        setWerewolfGame({ ...game });
+                        await new Promise(r => setTimeout(r, 1800));
+                        continue;
+                    }
+
+                    game.daySpeechPos += 1;
+                }
+
+                setTimeout(() => startWerewolfVote(game), 1500);
+            };
+
+            const startWerewolfVote = (game) => {
+                if (isGamePaused(game)) return;
+                game.phase = 'vote';
+                game.awaitingDaySpeech = null;
+                const alivePlayers = game.players.filter(p => p.alive && p.canVote);
+
+                let voteMsg = `🗳️ **投票环节**\n\n请投票选出你认为是狼人的玩家（可弃票）：\n\n`;
+                alivePlayers.forEach((p, i) => {
+                    voteMsg += `${i + 1}. ${p.name}\n`;
+                });
+                voteMsg += `0. 弃票\n`;
+
+                if (game.players.find(p => p.isHuman && p.alive && p.canVote)) {
+                    voteMsg += `\n请输入你要投票的玩家名字（如：@某某某），或输入“弃票”。`;
+                }
+
+                setMessages(prev => [...prev, createSystemMsg(voteMsg)]);
+
+                setWerewolfGame({ ...game });
+
+                setTimeout(() => runWerewolfAIVote(game), 2000);
+            };
+
+            const runWerewolfAIVote = async (game) => {
+                if (isGamePaused(game)) return;
+                const alivePlayers = game.players.filter(p => p.alive);
+                const votes = {};
+
+                for (const player of alivePlayers) {
+                    if (!player.isHuman && player.canVote) {
+                        const targets = alivePlayers.filter(p => p.id !== player.id);
+                        const agent = agents.find(a => a.id === player.id);
+                        if (!agent) continue;
+
+                        const decision = await decideAIVote(
+                            agent,
+                            player.role,
+                            messagesRef.current,
+                            targets,
+                            'main',
+                            '白天投票'
+                        );
+
+                        if (decision) {
+                            votes[player.id] = decision.id;
+                            setMessages(prev => [...prev, createAssistantMsg(`我投 **${decision.name}**`, player)]);
+                            await new Promise(r => setTimeout(r, 800));
+                        } else {
+                            votes[player.id] = 'abstain';
+                            setMessages(prev => [...prev, createAssistantMsg(`我弃票`, player)]);
+                            await new Promise(r => setTimeout(r, 500));
+                        }
+                    }
+                }
+
+                const existingPlayerVote = game.votes?.player;
+                game.votes = { ...votes };
+                if (existingPlayerVote) game.votes.player = existingPlayerVote;
+                setWerewolfGame({ ...game });
+
+                const humanPlayer = game.players.find(p => p.isHuman && p.alive && p.canVote);
+                if (!humanPlayer) {
+                    setTimeout(() => resolveWerewolfVote(game), 1500);
+                } else if (game.votes?.player && areAllVotesIn(game)) {
+                    setTimeout(() => resolveWerewolfVote(game), 1500);
+                }
+            };
+
+            const resolveWerewolfVote = async (game) => {
+                if (isGamePaused(game)) return;
+                const { voteCount, maxVotes, topTargets } = tallyVotes(game.votes || {}, game.players);
+
+                if (Object.keys(game.votes || {}).length > 0) {
+                    const voteLines = Object.entries(game.votes).map(([voterId, targetId]) => {
+                        const voter = game.players.find(p => p.id === voterId || (voterId === 'player' && p.isHuman));
+                        if (targetId === 'abstain') return `- ${voter?.name || voterId} → 弃票`;
+                        const target = game.players.find(p => p.id === targetId);
+                        return `- ${voter?.name || voterId} → ${target?.name || targetId}`;
+                    }).join('\n');
+                    const countLines = Object.entries(voteCount).map(([targetId, count]) => {
+                        const target = game.players.find(p => p.id === targetId);
+                        return `- ${target?.name || targetId}: ${count} 票`;
+                    }).join('\n');
+
+                    setMessages(prev => [...prev, createSystemMsg(`🧾 **投票总结**\n\n**投票记录**\n${voteLines}\n\n**票数统计**\n${countLines}`)]);
+                }
+
+                const maxVotePlayers = topTargets;
+
+                if (!maxVotePlayers.length) {
+                    setMessages(prev => [...prev, createSystemMsg(`🕊️ **无人投票**，本轮无人出局。`)]);
+                    setWerewolfGame({ ...game });
+                    game.day++;
+                    game.phase = 'night';
+                    game.votes = {};
+                    game.nightStage = 'guard';
+                    setTimeout(() => {
+                        setMessages(prev => [...prev, createSystemMsg(`🌙 **第 ${game.day} 夜降临，请闭眼...**`)]);
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => runWerewolfNight(game), 2000);
+                    }, 2000);
+                    return;
+                }
+
+                if (maxVotePlayers.length > 1) {
+                    const tiedNames = maxVotePlayers.map(p => p.name).join('、');
+                    setMessages(prev => [...prev, createSystemMsg(`⚖️ **平票！** ${tiedNames} 各得 ${maxVotes} 票，本轮无人出局。`)]);
+
+                    setWerewolfGame({ ...game });
+
+                    game.day++;
+                    game.phase = 'night';
+                    game.votes = {};
+                    game.nightStage = 'guard';
+
+                    setTimeout(() => {
+                        setMessages(prev => [...prev, {
+                            id: Date.now(),
+                            role: 'system',
+                            content: `🌙 **第 ${game.day} 夜降临，请闭眼...**`,
+                            room: 'main',
+                            time: formatTime(Date.now()),
+                            isSystem: true
+                        }]);
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => runWerewolfNight(game), 2000);
+                    }, 2000);
+                    return;
+                }
+
+                const eliminated = maxVotePlayers[0];
+
+                if (eliminated) {
+                    const roleInfo = WEREWOLF_ROLES[eliminated.role];
+
+                    if (eliminated.role === 'idiot' && !game.idiotRevealed) {
+                        game.idiotRevealed = true;
+                        eliminated.canVote = false;
+                        setMessages(prev => [...prev, {
+                            id: Date.now(),
+                            role: 'system',
+                            content: `🤪 **${eliminated.name}** 翻出身份牌：${roleInfo.emoji} ${roleInfo.name}！\n\n白痴免死，但失去投票权。游戏继续！`,
+                            room: 'main',
+                            time: formatTime(Date.now()),
+                            isSystem: true
+                        }]);
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => {
+                            game.day++;
+                            game.phase = 'night';
+                            game.votes = {};
+                            game.nightStage = 'guard';
+                            game.awaitingGuard = false;
+                            game.awaitingSeer = false;
+                            game.awaitingWitch = false;
+                            game.awaitingWolf = false;
+                            setMessages(prev => [...prev, {
+                                id: Date.now(),
+                                role: 'system',
+                                content: `🌙 **第 ${game.day} 夜降临，请闭眼...**`,
+                                room: 'main',
+                                time: formatTime(Date.now()),
+                                isSystem: true
+                            }]);
+                            setWerewolfGame({ ...game });
+                            setTimeout(() => runWerewolfNight(game), 2000);
+                        }, 2000);
+                        return;
+                    }
+
+                    eliminated.alive = false;
+                    setDeathLog(game, eliminated.id, `第${game.day}天`, '票死');
+
+                    setMessages(prev => [...prev, {
+                        id: Date.now(),
+                        role: 'system',
+                        content: `⚰️ **${eliminated.name}** 被投票出局！\n身份揭晓：${roleInfo.emoji} ${roleInfo.name}`,
+                        room: 'main',
+                        time: formatTime(Date.now()),
+                        isSystem: true
+                    }]);
+
+                    enqueueLastWords(game, eliminated.id, '票死');
+                    game.pendingPostLastWords = {
+                        type: 'afterVote',
+                        hunterId: eliminated.role === 'hunter' ? eliminated.id : null
+                    };
+
+                    const waiting = await processLastWordsQueue(game);
+                    if (waiting) {
+                        setWerewolfGame({ ...game });
+                        return;
+                    }
+                    await continueAfterLastWords(game);
+                    return;
+                }
+
+                setWerewolfGame({ ...game });
+
+                if (checkWerewolfWin(game)) return;
+
+                proceedToNextNight(game);
+            };
+
+            const checkWerewolfWin = (game) => {
+                const aliveWolves = game.players.filter(p => p.alive && p.role === 'wolf').length;
+                const aliveVillagers = game.players.filter(p => p.alive && p.role !== 'wolf').length;
+
+                const buildRecap = (title) => {
+                    const lines = game.players.map(p => {
+                        const roleInfo = WEREWOLF_ROLES[p.role];
+                        const deathInfo = game.deathLog?.[p.id];
+                        const status = p.alive ? '（存活）' : (deathInfo ? `（${deathInfo.when}·${deathInfo.cause}）` : '（死亡）');
+                        return `- ${p.name}: ${roleInfo?.emoji} ${roleInfo?.name} ${status}`;
+                    }).join('\n');
+                    return `${title}\n\n**身份复盘**\n${lines}`;
+                };
+
+                if (aliveWolves === 0) {
+                    setMessages(prev => [...prev, {
+                        id: Date.now(),
+                        role: 'system',
+                        content: `🎉 **游戏结束！好人阵营胜利！** 🎉\n\n所有狼人已被消灭！`,
+                        room: 'main',
+                        time: formatTime(Date.now()),
+                        isSystem: true
+                    }]);
+                    setMessages(prev => [...prev, {
+                        id: Date.now() + 1,
+                        role: 'system',
+                        content: buildRecap('📌 **复盘总结**'),
+                        room: 'main',
+                        time: formatTime(Date.now()),
+                        isSystem: true
+                    }]);
+                    setWerewolfGame(null);
+                    return true;
+                }
+
+                if (aliveWolves >= aliveVillagers) {
+                    setMessages(prev => [...prev, {
+                        id: Date.now(),
+                        role: 'system',
+                        content: `🐺 **游戏结束！狼人阵营胜利！** 🐺\n\n狼人数量已达到或超过好人数量！`,
+                        room: 'main',
+                        time: formatTime(Date.now()),
+                        isSystem: true
+                    }]);
+                    setMessages(prev => [...prev, {
+                        id: Date.now() + 1,
+                        role: 'system',
+                        content: buildRecap('📌 **复盘总结**'),
+                        room: 'main',
+                        time: formatTime(Date.now()),
+                        isSystem: true
+                    }]);
+                    setWerewolfGame(null);
+                    return true;
+                }
+
+                return false;
+            };
+
+            const handleWerewolfPlayerAction = (input, inputRoom = 'main') => {
+                if (!werewolfGame) return false;
+
+                const game = werewolfGame;
+
+                if (isGamePaused(game)) return true;
+
+                if (game.phase === 'night' && game.awaitingGuard) {
+                    const guardTargets = game.players.filter(p => p.alive && p.id !== game.lastGuarded);
+                    if (input.includes('跳过')) {
+                        game.awaitingGuard = false;
+                        game.nightActions.guardProtect = null;
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => runWerewolfNight(game), 500);
+                        return true;
+                    }
+                    const target = guardTargets.find(p => input.includes(`@${p.name}`) || input.includes(p.name));
+                    if (target && input.includes('守护')) {
+                        game.nightActions.guardProtect = target.id;
+                        game.lastGuarded = target.id;
+                        game.awaitingGuard = false;
+                        setMessages(prev => [...prev, createUserMsg(`我守护了 ${target.name}`, 'main', { isAction: true, actionType: 'action' })]);
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => runWerewolfNight(game), 500);
+                        return true;
+                    }
+                }
+
+                if (game.phase === 'night' && game.awaitingWolf) {
+                    const aliveTargets = game.players.filter(p => p.alive && p.role !== 'wolf');
+                    const target = getMentionedTarget(input, aliveTargets);
+                    if (target && (input.includes('击杀') || input.includes('投票') || input.includes('杀') || input.includes('刀'))) {
+                        game.nightActions.wolfVotes = game.nightActions.wolfVotes || {};
+                        game.nightActions.wolfVotes['player'] = target.id;
+                        game.awaitingWolf = false;
+                        const wolfMsg = createUserMsg(`我选择击杀 ${target.name}`, inputRoom, { isAction: true, actionType: 'vote' });
+                        if (inputRoom === 'small') {
+                            setSmallGroupMessages(prev => [...prev, wolfMsg]);
+                        } else {
+                            setMessages(prev => [...prev, wolfMsg]);
+                        }
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => runWerewolfNight(game), 500);
+                        return true;
+                    }
+                }
+
+                if (game.phase === 'night' && game.awaitingSeer) {
+                    const targets = game.players.filter(p => p.alive && !p.isHuman);
+                    const target = targets.find(p => input.includes(`@${p.name}`) || input.includes(p.name));
+                    if (target && input.includes('查验')) {
+                        const result = target.role === 'wolf' ? '狼人' : '好人';
+                        const seer = game.players.find(p => p.role === 'seer' && p.isHuman);
+                        game.seerResult[seer.id] = { targetId: target.id, targetName: target.name, result, day: game.day };
+                        game.nightActions.seerCheck = target.id;
+                        game.awaitingSeer = false;
+                        setMessages(prev => [...prev, createSystemMsg(`🔮 你查验了 **${target.name}**，结果是：**${result}**。`)]);
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => runWerewolfNight(game), 500);
+                        return true;
+                    }
+                }
+
+                if (game.phase === 'night' && game.awaitingWitch) {
+                    const alivePlayers = game.players.filter(p => p.alive);
+                    const witch = game.players.find(p => p.role === 'witch' && p.isHuman);
+                    const target = alivePlayers.find(p => input.includes(`@${p.name}`) || input.includes(p.name));
+                    if (input.includes('跳过')) {
+                        game.awaitingWitch = false;
+                        game.nightActions.witchActed = true;
+                        game.nightStage = 'seer';
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => runWerewolfNight(game), 500);
+                        return true;
+                    }
+                    if (target) {
+                        if (input.includes('救') && game.witchPotion.heal) {
+                            const isSelfSave = target.id === witch?.id;
+                            if (isSelfSave && !werewolfConfig.witchSelfSave) {
+                                setMessages(prev => [...prev, createSystemMsg(`⚠️ 本局规则禁止女巫自救，请选择其他目标或输入"跳过"。`)]);
+                                return true;
+                            }
+                            game.nightActions.witchHeal = target.id;
+                            game.nightActions.witchActed = true;
+                            game.witchPotion.heal = false;
+                            game.awaitingWitch = false;
+                            game.nightStage = 'seer';
+                            setMessages(prev => [...prev, createUserMsg(`我使用解药救了 ${target.name}`, 'main', { isAction: true, actionType: 'action' })]);
+                            setWerewolfGame({ ...game });
+                            setTimeout(() => runWerewolfNight(game), 500);
+                            return true;
+                        }
+                        if (input.includes('毒') && game.witchPotion.poison) {
+                            game.nightActions.witchPoison = target.id;
+                            game.nightActions.witchActed = true;
+                            game.witchPotion.poison = false;
+                            game.awaitingWitch = false;
+                            game.nightStage = 'seer';
+                            setMessages(prev => [...prev, createUserMsg(`我使用毒药毒了 ${target.name}`, 'main', { isAction: true, actionType: 'action' })]);
+                            setWerewolfGame({ ...game });
+                            setTimeout(() => runWerewolfNight(game), 500);
+                            return true;
+                        }
+                    }
+                }
+
+                if (game.pendingHunterShot === 'player') {
+                    if (input.includes('不开枪')) {
+                        game.pendingHunterShot = null;
+                        setMessages(prev => [...prev, createUserMsg(`我选择不开枪`, 'main', { isAction: true, actionType: 'action' })]);
+                        setWerewolfGame({ ...game });
+                        if (checkWerewolfWin(game)) return true;
+                        proceedToNextNight(game, 1000);
+                        return true;
+                    }
+                    const alivePlayers = game.players.filter(p => p.alive);
+                    const target = alivePlayers.find(p => input.includes(`@${p.name}`) || input.includes(p.name));
+                    if (target && input.includes('开枪')) {
+                        target.alive = false;
+                        game.pendingHunterShot = null;
+                        setDeathLog(game, target.id, `第${game.day}天`, '枪杀');
+                        const targetRole = WEREWOLF_ROLES[target.role];
+                        setMessages(prev => [...prev, createUserMsg(`我开枪带走了 ${target.name}`, 'main', { isAction: true, actionType: 'action' })]);
+                        setMessages(prev => [...prev, createSystemMsg(`${target.name} 的身份是：${targetRole.emoji} ${targetRole.name}`)]);
+                        setWerewolfGame({ ...game });
+                        if (checkWerewolfWin(game)) return true;
+                        enqueueLastWords(game, target.id, '枪杀');
+                        game.pendingPostLastWords = { type: 'afterHunterShot' };
+                        processLastWordsQueue(game).then((waiting) => {
+                            if (waiting) return;
+                            continueAfterLastWords(game);
+                        });
+                        return true;
+                    }
+                }
+
+                if (game.awaitingLastWords) {
+                    const target = game.players.find(p => p.id === game.awaitingLastWords.playerId);
+                    if (target?.isHuman) {
+                        setMessages(prev => [...prev, createUserMsg(input, 'main', { isAction: true, actionType: 'action' })]);
+                        game.awaitingLastWords = null;
+                        setWerewolfGame({ ...game });
+                        processLastWordsQueue(game).then((waiting) => {
+                            if (waiting) return;
+                            continueAfterLastWords(game);
+                        });
+                        return true;
+                    }
+                }
+
+                if (game.phase === 'vote') {
+                    const alivePlayers = game.players.filter(p => p.alive);
+                    if (input.includes('弃票')) {
+                        game.votes = game.votes || {};
+                        game.votes['player'] = 'abstain';
+                        setMessages(prev => [...prev, createUserMsg(`我弃票`, 'main', { isAction: true, actionType: 'vote' })]);
+                        setWerewolfGame({ ...game });
+                        if (areAllVotesIn(game)) {
+                            setTimeout(() => resolveWerewolfVote(game), 1500);
+                        } else {
+                            setMessages(prev => [...prev, createSystemMsg(`🕒 已记录你的弃票，等待其他玩家完成投票。`)]);
+                        }
+                        return true;
+                    }
+                    const mentioned = alivePlayers.find(p => input.includes(`@${p.name}`) || input.includes(p.name));
+
+                    if (mentioned) {
+                        game.votes = game.votes || {};
+                        game.votes['player'] = mentioned.id;
+
+                        setMessages(prev => [...prev, createUserMsg(`我投 **${mentioned.name}**`, 'main', { isAction: true, actionType: 'vote' })]);
+
+                        setWerewolfGame({ ...game });
+                        if (areAllVotesIn(game)) {
+                            setTimeout(() => resolveWerewolfVote(game), 1500);
+                        } else {
+                            setMessages(prev => [...prev, createSystemMsg(`🕒 已记录你的投票，等待其他玩家完成投票。`)]);
+                        }
+                        return true;
+                    }
+                }
+
+                if (game.phase === 'day' && game.awaitingDaySpeech) {
+                    const current = game.players.find(p => p.id === game.awaitingDaySpeech);
+                    if (current?.isHuman) {
+                        setMessages(prev => [...prev, createUserMsg(input)]);
+                        game.awaitingDaySpeech = null;
+                        game.daySpeechPos += 1;
+                        setWerewolfGame({ ...game });
+                        setTimeout(() => runWerewolfDaySpeech(game), 500);
+                        return true;
+                    }
+                }
+
+                return false;
+            };
+
+            const toggleWerewolfPause = () => {
+                if (!werewolfGame) return;
+                const next = { ...werewolfGame, paused: !werewolfGame.paused };
+                setWerewolfGame(next);
+
+                if (!next.paused) {
+                    if (next.phase === 'night') setTimeout(() => runWerewolfNight(next), 500);
+                    if (next.phase === 'day') setTimeout(() => runWerewolfDaySpeech(next), 500);
+                    if (next.phase === 'vote') setTimeout(() => resolveWerewolfVote(next), 500);
+                }
+            };
+
+            const setDeathLog = (game, playerId, whenLabel, causeLabel) => {
+                if (!playerId) return;
+                game.deathLog = game.deathLog || {};
+                game.deathLog[playerId] = { when: whenLabel, cause: causeLabel };
+            };
+
+            const proceedToNextNight = (game, delay = 2000) => {
+                game.day++;
+                game.phase = 'night';
+                game.votes = {};
+                game.nightStage = 'guard';
+                game.awaitingGuard = false;
+                game.awaitingSeer = false;
+                game.awaitingWitch = false;
+                game.awaitingWolf = false;
+                game.awaitingDaySpeech = null;
+                game.daySpeechOrder = [];
+                game.daySpeechPos = 0;
+
+                setTimeout(() => {
+                    setMessages(prev => [...prev, createSystemMsg(`🌙 **第 ${game.day} 夜降临，请闭眼...**`)]);
+                    setWerewolfGame({ ...game });
+                    setTimeout(() => runWerewolfNight(game), 2000);
+                }, delay);
+            };
+
+            const enqueueLastWords = (game, playerId, reasonLabel) => {
+                if (!playerId) return;
+                game.lastWordsQueue = game.lastWordsQueue || [];
+                game.lastWordsQueue.push({ playerId, reason: reasonLabel });
+            };
+
+            const processLastWordsQueue = async (game) => {
+                if (game.awaitingLastWords) return true;
+                while (game.lastWordsQueue?.length) {
+                    const next = game.lastWordsQueue.shift();
+                    const player = game.players.find(p => p.id === next.playerId);
+                    if (!player) continue;
+                    if (player.isHuman) {
+                        game.awaitingLastWords = next;
+                        setWerewolfGame({ ...game });
+                        setMessages(prev => [...prev, createSystemMsg(`📝 你被${next.reason}，请发表遗言。`)]);
+                        return true;
+                    }
+                    const agent = agents.find(a => a.id === player.id);
+                    if (agent) {
+                        await triggerAgentResponse(agent, messagesRef.current, `你被${next.reason}，请发表遗言。`, 'main');
+                    } else {
+                        setMessages(prev => [...prev, createSystemMsg(`📝 **${player.name}** 被${next.reason}，未能发言。`)]);
+                    }
+                }
+                return false;
+            };
+
+            const continueAfterLastWords = async (game) => {
+                const pending = game.pendingPostLastWords;
+                game.pendingPostLastWords = null;
+                if (!pending) return;
+
+                if (pending.type === 'afterVote') {
+                    if (pending.hunterId) {
+                        const hunter = game.players.find(p => p.id === pending.hunterId);
+                        if (hunter?.isHuman) {
+                            game.pendingHunterShot = 'player';
+                            setWerewolfGame({ ...game });
+                            setMessages(prev => [...prev, createSystemMsg(`🏹 你是猎人，请输入“开枪 @玩家名”选择带走目标。`)]);
+                            return;
+                        }
+                        if (hunter) {
+                            const targets = game.players.filter(p => p.alive && p.id !== hunter.id);
+                            const target = targets[Math.floor(Math.random() * targets.length)];
+                            if (target) {
+                                target.alive = false;
+                                setDeathLog(game, target.id, `第${game.day}天`, '枪杀');
+                                setMessages(prev => [...prev, createSystemMsg(`🏹 **${hunter.name}** 开枪带走了 **${target.name}**！`)]);
+                                enqueueLastWords(game, target.id, '枪杀');
+                            }
+                        }
+                        const waiting = await processLastWordsQueue(game);
+                        if (waiting) return;
+                        return proceedToNextNight(game);
+                    }
+                    return proceedToNextNight(game);
+                }
+
+                if (pending.type === 'afterHunterShot') {
+                    return proceedToNextNight(game);
+                }
+            };
+
+            // 狼人杀设置面板
+            const WerewolfSetupModal = ({ open, onClose, config, setConfig, onStart, agents, darkMode }) => {
+                if (!open) return null;
+
+                const enabledAgents = agents.filter(a => a.enabled);
+                const totalPlayers = config.playerJoin ? enabledAgents.length + 1 : enabledAgents.length;
+                const availableRoles = ['seer', 'witch', 'hunter', 'guard', 'idiot'];
+
+                const toggleRole = (role) => {
+                    setConfig(prev => ({
+                        ...prev,
+                        roles: prev.roles.includes(role)
+                            ? prev.roles.filter(r => r !== role)
+                            : [...prev.roles, role]
+                    }));
+                };
+
+                return (
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 fade-enter">
+                        <div className={cn("w-full max-w-md rounded-xl shadow-2xl p-6", darkMode ? "bg-zinc-900 border border-zinc-800 text-zinc-100" : "bg-white text-zinc-900")}>
+                            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                                <Icons.Wolf className="w-6 h-6 text-red-500"/> 狼人杀游戏设置
+                            </h2>
+
+                            <div className="space-y-4">
+                                <div className="p-3 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-sm">
+                                    <p>当前启用演员：<strong>{enabledAgents.length}</strong> 人</p>
+                                    <p>总玩家数：<strong>{totalPlayers}</strong> 人</p>
+                                </div>
+
+                                <div>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={config.playerJoin}
+                                            onChange={e => setConfig({...config, playerJoin: e.target.checked})}
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-sm">我作为玩家参与游戏</span>
+                                    </label>
+                                    {config.playerJoin && (
+                                        <input
+                                            value={config.playerName}
+                                            onChange={e => setConfig({...config, playerName: e.target.value})}
+                                            placeholder="你的名字"
+                                            className={cn("mt-2 w-full px-3 py-2 rounded border text-sm", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}
+                                        />
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-medium text-zinc-500 mb-1">狼人数量</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={Math.max(1, Math.floor(totalPlayers / 3))}
+                                        value={config.wolfCount}
+                                        onChange={e => setConfig({...config, wolfCount: parseInt(e.target.value) || 1})}
+                                        className={cn("w-full px-3 py-2 rounded border text-sm", darkMode ? "bg-zinc-950 border-zinc-700" : "bg-white border-zinc-200")}
+                                    />
+                                    <p className="text-[10px] text-zinc-500 mt-1">建议：{totalPlayers}人局推荐 {Math.max(1, Math.floor(totalPlayers / 4))} 只狼</p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-medium text-zinc-500 mb-2">选择神职</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {availableRoles.map(role => {
+                                            const info = WEREWOLF_ROLES[role];
+                                            const selected = config.roles.includes(role);
+                                            return (
+                                                <button
+                                                    key={role}
+                                                    onClick={() => toggleRole(role)}
+                                                    className={cn(
+                                                        "px-3 py-1.5 rounded-full text-xs font-medium border transition-all",
+                                                        selected
+                                                            ? "bg-purple-600 text-white border-purple-600"
+                                                            : "border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                                    )}
+                                                >
+                                                    {info.emoji} {info.name}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="text-[10px] text-zinc-500 mt-2">剩余位置将自动填充村民</p>
+                                </div>
+
+                                <div>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={config.witchSelfSave || false}
+                                            onChange={e => setConfig({...config, witchSelfSave: e.target.checked})}
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-sm">允许女巫自救</span>
+                                    </label>
+                                    <p className="text-[10px] text-zinc-500 mt-1">默认禁止女巫使用解药救自己</p>
+                                </div>
+
+                                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700 dark:text-amber-400">
+                                    <p className="font-bold mb-1">⚠️ 提示</p>
+                                    <p>开始游戏后，狼人将自动被拉入小群作为私聊频道。</p>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 flex justify-end gap-2">
+                                <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-500">取消</button>
+                                <button
+                                    onClick={onStart}
+                                    disabled={totalPlayers < 4}
+                                    className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    <Icons.Wolf className="w-4 h-4"/> 开始游戏
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className={cn("flex h-screen w-full overflow-hidden transition-colors duration-300", darkMode ? "bg-zinc-950 text-zinc-100" : "bg-zinc-50 text-zinc-900")}>
+                    <Toast toasts={toasts} removeToast={(id) => setToasts(p => p.filter(t => t.id !== id))} />
+
+                    <GlobalConfigModal
+                        open={showConfig}
+                        onClose={() => setShowConfig(false)}
+                        configs={configs} setConfigs={setConfigs}
+                        prompts={prompts} setPrompts={setPrompts}
+                        directorConfigId={directorConfigId} setDirectorConfigId={setDirectorConfigId}
+                        directorRule={directorRule} setDirectorRule={setDirectorRule}
+                        directorMode={directorMode} setDirectorMode={setDirectorMode}
+                        contextWindowSize={contextWindowSize} setContextWindowSize={setContextWindowSize}
+                        werewolfRolePrompts={werewolfRolePrompts} setWerewolfRolePrompts={setWerewolfRolePrompts}
+                        darkMode={darkMode} addToast={addToast}
+                    />
+
+                    <AgentModal
+                        open={showAgentModal}
+                        onClose={() => setShowAgentModal(false)}
+                        agent={editingAgentId ? agents.find(a => a.id === editingAgentId) : null}
+                        isNew={!editingAgentId}
+                        configs={configs} prompts={prompts}
+                        onSave={handleSaveAgent} onDelete={handleDeleteAgent}
+                        darkMode={darkMode}
+                    />
+
+                    <WerewolfSetupModal
+                        open={showWerewolfSetup}
+                        onClose={() => setShowWerewolfSetup(false)}
+                        config={werewolfConfig}
+                        setConfig={setWerewolfConfig}
+                        onStart={startWerewolfGame}
+                        agents={agents}
+                        darkMode={darkMode}
+                    />
+
+                    {/* Sidebar */}
+                    <div className="w-64 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col shrink-0">
+                        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                            <h1 className="font-bold flex items-center gap-2"><Icons.Users className="w-5 h-5 text-purple-600"/> 演员名单</h1>
+                            <button onClick={() => setDarkMode(!darkMode)} className="text-zinc-500 hover:text-zinc-300">
+                                {darkMode ? <Icons.Sun className="w-5 h-5"/> : <Icons.Moon className="w-5 h-5"/>}
+                            </button>
+                        </div>
+                        <div className="p-2 overflow-y-auto flex-1 space-y-2">
+                            {agents.map(agent => {
+                                const cfg = configs.find(c => c.id === agent.configId);
+                                const pmt = prompts.find(p => p.id === agent.promptId);
+                                const inSmallGroup = smallGroupMembers.includes(agent.id);
+                                const wwPlayersSource = werewolfGame?.players?.length ? werewolfGame.players : werewolfLastPlayers;
+                                const wwPlayer = wwPlayersSource?.find(p => p.id === agent.id);
+                                const wwRoleInfo = wwPlayer ? WEREWOLF_ROLES[wwPlayer.role] : null;
+                                return (
+                                    <div key={agent.id} className={cn("group p-3 rounded-lg flex items-center gap-3 border transition-all relative", agent.enabled ? (darkMode ? "bg-zinc-800 border-zinc-700" : "bg-white border-purple-200 shadow-sm") : "opacity-50 border-transparent")}>
+                                        <div onClick={() => setAgents(prev => prev.map(a => a.id === agent.id ? {...a, enabled: !a.enabled} : a))} className="cursor-pointer flex items-center gap-3 flex-1">
+                                            <div className={cn("w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shrink-0", agent.avatarColor)}>{agent.name[0]}</div>
+                                            <div className="min-w-0">
+                                                <div className="font-medium text-sm truncate flex items-center gap-2">
+                                                    <span>{agent.name}</span>
+                                                    {directorMode === 'werewolf' && werewolfGame && werewolfRevealAll && wwRoleInfo && (
+                                                        <span className={cn("text-[10px] px-2 py-0.5 rounded-full border", wwPlayer?.alive ? "border-purple-500/40 text-purple-400" : "border-zinc-500/40 text-zinc-400 line-through")}>
+                                                            {wwRoleInfo.emoji} {wwRoleInfo.name}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="text-xs text-zinc-500 truncate flex items-center gap-1">
+                                                    <span className="max-w-[60px] truncate">{cfg?.name}</span> • <span className="max-w-[60px] truncate">{pmt?.name}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="absolute right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                                            <button onClick={() => toggleSmallGroupMember(agent.id)} className={cn("p-1.5 rounded", inSmallGroup ? "text-green-500" : "text-zinc-400 hover:text-zinc-500")} title={inSmallGroup ? "移出小群" : "拉入小群"}><Icons.Users className="w-4 h-4"/></button>
+                                            <button onClick={() => { setEditingAgentId(agent.id); setShowAgentModal(true); }} className="p-1.5 hover:bg-black/10 rounded"><Icons.Edit className="w-4 h-4 text-zinc-400"/></button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className="p-4 border-t border-zinc-200 dark:border-zinc-800">
+                            <button onClick={() => { setEditingAgentId(null); setShowAgentModal(true); }} className="w-full py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 text-zinc-600 dark:text-zinc-300"><Icons.Plus className="w-4 h-4"/> 添加演员</button>
+                        </div>
+                    </div>
+
+                    {/* Chat Area */}
+                    <div className="flex-1 flex flex-col relative">
+                        <div className="h-14 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur flex items-center justify-between px-6 z-10">
+                            <div className="flex items-center gap-4">
+                                <div className="font-bold">群聊剧场 <span className="text-xs font-normal text-zinc-500 ml-2">Director Mode</span></div>
+                                {directorStatus === 'thinking' && <div className="flex items-center gap-2 text-xs text-purple-500 animate-pulse"><Icons.Brain className="w-4 h-4"/> 导演调度中...</div>}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => exportChat('md', 'all')} className="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 flex items-center gap-1" title="导出为 Markdown">
+                                    <Icons.Download className="w-3.5 h-3.5"/> 导出
+                                </button>
+                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); clearChat('all', { confirm: false }); }} className="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200" title="清空大群与小群">
+                                    清空
+                                </button>
+                                {directorMode === 'werewolf' && (
+                                    <>
+                                        <button 
+                                            onClick={() => setWerewolfRevealAll(prev => !prev)}
+                                            className={cn("flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border", werewolfRevealAll ? "bg-purple-500/10 text-purple-600 border-purple-500/20" : "bg-zinc-100 text-zinc-500 border-transparent dark:bg-zinc-800 dark:text-zinc-400")}
+                                        >
+                                            <Icons.Eye className="w-3.5 h-3.5"/> {werewolfRevealAll ? '隐藏视野' : '全局视野'}
+                                        </button>
+                                        <button 
+                                            onClick={() => werewolfGame ? toggleWerewolfPause() : setShowWerewolfSetup(true)} 
+                                            className={cn("flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border", werewolfGame ? "bg-amber-500/10 text-amber-600 border-amber-500/20" : "bg-red-600 text-white border-red-600")}
+                                        >
+                                            <Icons.Wolf className="w-3.5 h-3.5"/> {werewolfGame ? (werewolfGame.paused ? '继续游戏' : '暂停游戏') : '开始狼人杀'}
+                                        </button>
+                                    </>
+                                )}
+                                {directorMode !== 'werewolf' && (
+                                    <button onClick={() => setIsAutoPlay(prev => !prev)} className={cn("flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border", isAutoPlay ? "bg-green-500/10 text-green-600 border-green-500/20" : "bg-zinc-100 text-zinc-500 border-transparent dark:bg-zinc-800 dark:text-zinc-400")}> 
+                                        {isAutoPlay ? <><Icons.Pause className="w-3 h-3"/> 自动互怼中</> : <><Icons.Play className="w-3 h-3"/> 开启自动互怼</>}
+                                    </button>
+                                )}
+                                <button onClick={() => setSmallGroupVisible(prev => !prev)} className="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
+                                    {smallGroupVisible ? '收起小群' : '展开小群'}
+                                </button>
+                                <button onClick={() => setShowConfig(true)} className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" title="全局资源配置"><Icons.Settings className="w-5 h-5"/></button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 flex gap-4 p-4 bg-zinc-50 dark:bg-zinc-950/50 min-h-0">
+                            <div className="flex flex-1 flex-col min-h-0">
+                                <div className="flex-1 overflow-y-auto space-y-6 pr-1 min-h-0">
+                                    {directorMode === 'werewolf' && (werewolfGame || werewolfLastPlayers.length > 0) && werewolfRevealAll && (
+                                        <div className="p-4 rounded-xl border border-purple-300/30 bg-purple-50/50 dark:bg-purple-900/10 dark:border-purple-700/40">
+                                            <div className="text-xs font-bold text-purple-600 mb-2 flex items-center gap-2">
+                                                <Icons.Eye className="w-4 h-4"/> 全局视野（身份公开）
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                                {(werewolfGame?.players?.length ? werewolfGame.players : werewolfLastPlayers).map(p => {
+                                                    const roleInfo = WEREWOLF_ROLES[p.role];
+                                                    return (
+                                                        <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/70 dark:bg-zinc-900/70 border border-zinc-200/50 dark:border-zinc-800/50">
+                                                            <span className={cn(p.alive ? "text-zinc-700 dark:text-zinc-200" : "text-zinc-400 line-through")}>{p.name}</span>
+                                                            <span className="text-purple-600">{roleInfo?.emoji} {roleInfo?.name}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {messages.length === 0 && (
+                                        <div className="h-full flex flex-col items-center justify-center opacity-30 select-none">
+                                            <Icons.Users className="w-20 h-20 mb-4 text-zinc-400"/>
+                                            <p>请先在右上角配置资源</p>
+                                        </div>
+                                    )}
+                                    {messages.map((msg) => {
+                                        const isUser = msg.role === 'user';
+                                        const isSystem = msg.isSystem;
+                                        const isAction = msg.isAction && isUser;
+                                        const userBubbleClass = isAction
+                                            ? (msg.actionType === 'vote' ? "bg-emerald-600 text-white rounded-tr-none ring-1 ring-emerald-300/40" : "bg-amber-600 text-white rounded-tr-none ring-1 ring-amber-300/40")
+                                            : "bg-zinc-800 text-white rounded-tr-none";
+                                        if (isSystem) {
+                                            return (
+                                                <div key={msg.id} className="flex justify-center">
+                                                    <div className="max-w-3xl w-full">
+                                                        <div className="mx-auto px-4 py-2 rounded-xl border text-xs text-center bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-200 dark:border-indigo-700/50">
+                                                            <Markdown content={msg.content} />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+                                        return (
+                                            <div key={msg.id} className={cn("flex gap-4 max-w-3xl group", isUser ? "ml-auto flex-row-reverse" : "")}> 
+                                                <div className={cn("w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0 shadow-lg mt-1", isUser ? "bg-zinc-800 dark:bg-zinc-700" : (msg.avatarColor || "bg-gray-500"))}>
+                                                    {isUser ? <Icons.User className="w-5 h-5"/> : msg.senderName?.[0]}
+                                                </div>
+                                                <div className={cn("flex flex-col max-w-[80%]", isUser ? "items-end" : "items-start")}> 
+                                                    <div className="flex items-center gap-2 mb-1 px-1">
+                                                        <span className="text-xs font-bold text-zinc-500">{isUser ? "你" : msg.senderName}</span>
+                                                        {msg.time && <span className="text-[10px] text-zinc-400">{msg.time}</span>}
+                                                        <button onClick={() => copyToClipboard(msg.content)} className="ml-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-zinc-600" title="复制消息">
+                                                            <Icons.Copy className="w-3.5 h-3.5"/>
+                                                        </button>
+                                                    </div>
+                                                    <div className={cn("rounded-2xl px-5 py-3 shadow-sm text-sm leading-relaxed", isUser ? userBubbleClass : "bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-tl-none dark:text-zinc-200")}> 
+                                                        {msg.isThinking ? <div className="flex gap-1 py-1 h-5 items-center"><div className="w-1.5 h-1.5 bg-current rounded-full typing-dot"></div><div className="w-1.5 h-1.5 bg-current rounded-full typing-dot"></div><div className="w-1.5 h-1.5 bg-current rounded-full typing-dot"></div></div> : <Markdown content={msg.content} />}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    <div ref={messagesEndRef} />
+                                </div>
+                                <div className="mt-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
+                                    <div className="flex flex-wrap gap-2 mb-2">
+                                        <button onClick={() => quickAt('所有人', 'main')} className="px-2 py-1 text-xs rounded-full border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 flex items-center gap-1">
+                                            <Icons.AtSign className="w-3 h-3"/> @所有人
+                                        </button>
+                                        {getEnabledAgents().map(a => (
+                                            <button key={a.id} onClick={() => quickAt(a.name, 'main')} className="px-2 py-1 text-xs rounded-full border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
+                                                @{a.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleUserSend()} placeholder={isAutoPlay ? "插嘴..." : "说点什么..."} className="flex-1 bg-zinc-100 dark:bg-zinc-900 border-none rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-500/50 dark:text-white transition-all" disabled={activeSpeakerId !== null && !isAutoPlay} />
+                                        <button onClick={handleUserSend} disabled={!input.trim() || (activeSpeakerId !== null && !isAutoPlay)} className="bg-purple-600 hover:bg-purple-700 text-white p-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-lg shadow-purple-500/20"><Icons.Send className="w-5 h-5"/></button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {smallGroupVisible && (
+                                <>
+                                    <div onMouseDown={() => setIsDragging(true)} className="hidden xl:block w-1.5 cursor-col-resize rounded-full bg-zinc-200/80 dark:bg-zinc-800/80" />
+                                    <div className="flex flex-col min-h-0 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white/70 dark:bg-zinc-900/70" style={{ width: smallGroupWidth }}>
+                                        <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                                            <div className="font-bold text-sm">{werewolfGame ? '🐺 狼人密聊' : '私密小群'}</div>
+                                            <div className="text-xs text-zinc-500">成员 {getSmallGroupAgents().length}</div>
+                                        </div>
+                                        {(() => {
+                                            const humanPlayer = werewolfGame?.players?.find(p => p.isHuman);
+                                            const canSeeWolfChat = !werewolfGame || werewolfRevealAll || humanPlayer?.role === 'wolf';
+                                            if (!canSeeWolfChat) {
+                                                return (
+                                                    <div className="flex-1 flex items-center justify-center text-xs text-zinc-500 p-4">
+                                                        狼人密聊仅狼人可见
+                                                    </div>
+                                                );
+                                            }
+                                            return (
+                                                <>
+                                                    <div className="flex-1 overflow-y-auto p-3 space-y-4 min-h-0">
+                                                        {smallGroupMessages.length === 0 && (
+                                                            <div className="h-full flex flex-col items-center justify-center opacity-40 select-none text-xs text-zinc-500">
+                                                                <p>这里是小群聊天</p>
+                                                                <p>@某位演员 或 @所有人</p>
+                                                            </div>
+                                                        )}
+                                                        {smallGroupMessages.map((msg) => {
+                                                            const isUser = msg.role === 'user';
+                                                            const isSystem = msg.isSystem;
+                                                            const isAction = msg.isAction && isUser;
+                                                            const userBubbleClass = isAction
+                                                                ? (msg.actionType === 'vote' ? "bg-emerald-600 text-white rounded-tr-none ring-1 ring-emerald-300/40" : "bg-amber-600 text-white rounded-tr-none ring-1 ring-amber-300/40")
+                                                                : "bg-zinc-800 text-white rounded-tr-none";
+                                                            if (isSystem) {
+                                                                return (
+                                                                    <div key={msg.id} className="flex justify-center">
+                                                                        <div className="mx-auto px-3 py-2 rounded-xl border text-[11px] text-center bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-700/50">
+                                                                            <Markdown content={msg.content} />
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            return (
+                                                                <div key={msg.id} className={cn("flex gap-3 group", isUser ? "ml-auto flex-row-reverse" : "")}> 
+                                                                    <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0 shadow", isUser ? "bg-zinc-800 dark:bg-zinc-700" : (msg.avatarColor || "bg-gray-500"))}>
+                                                                        {isUser ? <Icons.User className="w-4 h-4"/> : msg.senderName?.[0]}
+                                                                    </div>
+                                                                    <div className={cn("flex flex-col max-w-[75%]", isUser ? "items-end" : "items-start")}> 
+                                                                        <div className="flex items-center gap-2 mb-1 px-1">
+                                                                            <span className="text-[10px] font-bold text-zinc-500">{isUser ? "你" : msg.senderName}</span>
+                                                                            <button onClick={() => copyToClipboard(msg.content)} className="ml-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-zinc-600" title="复制消息">
+                                                                                <Icons.Copy className="w-3 h-3"/>
+                                                                            </button>
+                                                                        </div>
+                                                                        <div className={cn("rounded-2xl px-4 py-2 shadow-sm text-xs leading-relaxed", isUser ? userBubbleClass : "bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-tl-none dark:text-zinc-200")}> 
+                                                                            {msg.isThinking ? <div className="flex gap-1 py-1 h-4 items-center"><div className="w-1 h-1 bg-current rounded-full typing-dot"></div><div className="w-1 h-1 bg-current rounded-full typing-dot"></div><div className="w-1 h-1 bg-current rounded-full typing-dot"></div></div> : <Markdown content={msg.content} />}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        <div ref={smallGroupEndRef} />
+                                                    </div>
+                                                    <div className="p-3 border-t border-zinc-200 dark:border-zinc-800">
+                                                        <div className="flex flex-wrap gap-2 mb-2">
+                                                            <button onClick={() => quickAt('所有人', 'small')} className="px-2 py-1 text-[10px] rounded-full border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 flex items-center gap-1">
+                                                                <Icons.AtSign className="w-3 h-3"/> @所有人
+                                                            </button>
+                                                            {getSmallGroupAgents().map(a => (
+                                                                <button key={a.id} onClick={() => quickAt(a.name, 'small')} className="px-2 py-1 text-[10px] rounded-full border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
+                                                                    @{a.name}
+                                                                </button>
+                                                            ))}
+                                                            <button onClick={() => exportChat('md', 'small')} className="ml-auto px-2 py-1 text-[10px] rounded-full border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 flex items-center gap-1" title="导出小群">
+                                                                <Icons.Download className="w-3 h-3"/> 导出
+                                                            </button>
+                                                            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); clearChat('small', { confirm: false }); }} className="px-2 py-1 text-[10px] rounded-full border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200" title="清空小群">
+                                                                清空
+                                                            </button>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <input value={smallGroupInput} onChange={e => setSmallGroupInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSmallGroupSend()} placeholder="小群发言..." className="flex-1 bg-zinc-100 dark:bg-zinc-900 border-none rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-purple-500/50 dark:text-white transition-all" disabled={activeSpeakerId !== null && !isAutoPlay} />
+                                                            <button onClick={handleSmallGroupSend} disabled={!smallGroupInput.trim() || (activeSpeakerId !== null && !isAutoPlay)} className="bg-purple-600 hover:bg-purple-700 text-white p-2 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors"><Icons.Send className="w-4 h-4"/></button>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
