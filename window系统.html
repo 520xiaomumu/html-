@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebOS - 网页版操作系统</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            transition: background-image 0.7s ease;
+            user-select: none; /* 禁止选中文本 */
+        }
+        .window {
+            transition: opacity 0.15s, transform 0.15s;
+        }
+        .window.dragging {
+            transition: none; /* 拖拽时移除过渡以提高跟手性 */
+        }
+        .window.minimized {
+            transform: scale(0.8) translateY(100px);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .taskbar-blur {
+            backdrop-filter: blur(20px) saturate(180%);
+        }
+        .start-menu-animation {
+            animation: slideUp 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        @keyframes slideUp {
+            from { transform: translate(-50%, 20px); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
+        }
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        /* 文件菜单动画 */
+        .file-menu-enter {
+            animation: fadeIn 0.1s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        /* 选中状态样式 */
+        .icon-selected {
+            background-color: rgba(255, 255, 255, 0.2) !important;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        /* 桌面图标拖拽样式 */
+        .desktop-icon {
+            position: absolute; /* 关键：绝对定位 */
+            touch-action: none;
+            transition: transform 0.1s;
+        }
+        .desktop-icon:active {
+            cursor: grabbing;
+            transform: scale(1.05);
+            z-index: 50;
+        }
+        /* 加载动画 */
+        #loading-overlay {
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen bg-cover bg-center" style="background-image: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1964');" onclick="handleGlobalClick(event)">
+
+    <!-- 隐藏的文件上传输入框 -->
+    <input type="file" id="upload-input" multiple class="hidden" onchange="handleFilesSelected(this)">
+
+    <!-- 加载遮罩 -->
+    <div id="loading-overlay" class="fixed inset-0 z-[300] hidden flex flex-col items-center justify-center text-white">
+        <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p id="loading-text">正在处理系统数据...</p>
+    </div>
+
+    <!-- 桌面图标区域 -->
+    <div class="absolute top-0 left-0 w-full h-[calc(100vh-48px)] z-0 overflow-hidden" id="desktop-icons">
+        <!-- 动态生成 -->
+    </div>
+
+    <!-- 窗口容器 -->
+    <div id="window-container" class="relative w-full h-full pointer-events-none z-10">
+        <!-- 窗口动态生成 -->
+    </div>
+
+    <!-- 自定义系统模态框 -->
+    <div id="system-modal" class="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 hidden backdrop-blur-sm">
+        <div class="bg-white dark:bg-slate-800 rounded-lg shadow-2xl w-96 border border-white/10 transform scale-100 transition-transform">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <h3 class="text-lg font-medium text-gray-900 dark:text-white" id="modal-title">系统提示</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-500"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="px-6 py-4">
+                <p class="text-sm text-gray-500 dark:text-gray-300" id="modal-message">内容</p>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3" id="modal-actions">
+                <!-- 按钮动态生成 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 文件操作菜单 -->
+    <div id="file-context-menu" class="fixed hidden bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl border border-white/20 rounded-lg shadow-xl z-50 w-36 py-1 file-menu-enter" oncontextmenu="return false;">
+        <!-- 菜单项动态注入 -->
+    </div>
+
+    <!-- 开始菜单 -->
+    <div id="start-menu" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/5 hidden" onclick="toggleStartMenu(false)">
+        <div class="absolute bottom-16 left-1/2 -translate-x-1/2 w-[600px] h-[650px] bg-slate-900/90 backdrop-blur-3xl rounded-2xl border border-white/10 shadow-2xl p-8 flex flex-col start-menu-animation" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between mb-8">
+                <h2 class="text-white text-lg font-semibold">已固定的应用</h2>
+                <button class="text-xs text-white/50 bg-white/10 px-3 py-1.5 rounded-lg hover:bg-white/20 transition-colors">所有应用 &gt;</button>
+            </div>
+            <div id="pinned-apps" class="grid grid-cols-6 gap-6 mb-12"></div>
+            <div class="mt-auto flex items-center justify-between p-4 bg-black/40 rounded-xl border border-white/5">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white border border-white/20 shadow-lg">
+                        <i data-lucide="user"></i>
+                    </div>
+                    <div>
+                        <p class="text-white text-sm font-semibold leading-none">访客用户</p>
+                        <p class="text-white/40 text-[10px] mt-1 uppercase tracking-wider">系统管理员</p>
+                    </div>
+                </div>
+                <div class="flex gap-4">
+                    <button class="text-white/60 hover:text-white transition-colors"><i data-lucide="search" class="w-5 h-5"></i></button>
+                    <button class="text-white/60 hover:text-white transition-colors" onclick="location.reload()"><i data-lucide="monitor" class="w-5 h-5"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任务栏 -->
+    <div class="fixed bottom-0 left-0 right-0 h-12 bg-slate-900/80 taskbar-blur flex items-center px-4 z-[100] border-t border-white/10">
+        <div class="flex-1 flex items-center">
+            <button onclick="event.stopPropagation(); toggleStartMenu()" class="group h-10 w-10 flex items-center justify-center rounded-lg transition-all duration-300 hover:bg-white/10" id="start-btn">
+                <div class="grid grid-cols-2 gap-0.5 group-hover:scale-110 transition-transform">
+                    <div class="w-1.5 h-1.5 bg-blue-500 rounded-[2px]"></div>
+                    <div class="w-1.5 h-1.5 bg-blue-400 rounded-[2px]"></div>
+                    <div class="w-1.5 h-1.5 bg-blue-400 rounded-[2px]"></div>
+                    <div class="w-1.5 h-1.5 bg-blue-300 rounded-[2px]"></div>
+                </div>
+            </button>
+            <div class="ml-3 relative hidden sm:block">
+                <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 w-3.5 h-3.5"></i>
+                <div class="bg-white/10 hover:bg-white/15 transition-colors rounded-full pl-9 pr-4 py-1.5 text-[11px] text-white/80 w-44 border border-white/5 cursor-text">
+                    输入内容以搜索...
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-1" id="taskbar-apps"></div>
+        <div class="flex-1 flex items-center justify-end gap-4 text-white/90">
+            <div class="hidden lg:flex items-center gap-3 opacity-70">
+                 <i data-lucide="wifi" class="w-3.5 h-3.5"></i>
+                 <i data-lucide="volume-2" class="w-3.5 h-3.5"></i>
+                 <i data-lucide="battery" class="w-3.5 h-3.5 rotate-90"></i>
+            </div>
+            <div class="flex flex-col items-end cursor-pointer hover:bg-white/10 px-2 py-0.5 rounded-md transition-colors leading-tight" id="tray-clock">
+                <span class="text-[11px] font-bold" id="clock-time">00:00</span>
+                <span class="text-[9px] opacity-60 font-medium" id="clock-date">2025/1/1</span>
+            </div>
+            <div class="h-full w-px bg-white/10 mx-1"></div>
+            <div class="w-1.5 h-10 hover:bg-white/15 rounded-sm transition-colors cursor-default" title="显示桌面" onclick="minimizeAll()"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- 持久化数据占位符 (导出时会被替换) ---
+        const PRESET_DATA = null; /* PRESET_DATA_INJECTION */
+
+        // --- 系统配置 ---
+        const APPS = {
+            EXPLORER: { name: '资源管理器', icon: 'folder', color: 'text-blue-500', initialSize: { w: 700, h: 450 } },
+            NOTEPAD: { name: '记事本', icon: 'file-text', color: 'text-blue-400', initialSize: { w: 500, h: 500 } },
+            CALC: { name: '计算器', icon: 'calculator', color: 'text-orange-500', initialSize: { w: 320, h: 480 } },
+            TERMINAL: { name: '终端', icon: 'terminal', color: 'text-emerald-500', initialSize: { w: 600, h: 400 } },
+            EDGE: { name: '浏览器', icon: 'globe', color: 'text-blue-600', initialSize: { w: 900, h: 600 } },
+            SETTINGS: { name: '设置', icon: 'settings', color: 'text-slate-500', initialSize: { w: 600, h: 600 } },
+            VIEWER: { name: '图片查看器', icon: 'image', color: 'text-purple-500', initialSize: { w: 600, h: 500 } }
+        };
+
+        const WALLPAPERS = [
+            'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&q=80&w=2070',
+            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1964',
+            'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&q=80&w=2070',
+            'https://images.unsplash.com/photo-1557683316-973673baf926?auto=format&fit=crop&q=80&w=2029'
+        ];
+
+        // --- 全局状态 ---
+        let state = {
+            openWindows: {}, 
+            activeWindow: null,
+            zIndexCounter: 10,
+            isStartOpen: false,
+            uploadedFiles: [], 
+            systemIcons: [
+                { id: 'EXPLORER', label: '此电脑', icon: 'folder', color: 'text-blue-400', action: "openApp('EXPLORER')", x: 20, y: 20 },
+                { id: 'EDGE', label: '浏览器', icon: 'globe', color: 'text-blue-600', action: "openApp('EDGE')", x: 20, y: 110 },
+                { id: 'UPLOAD', label: '上传文件', icon: 'upload-cloud', color: 'text-indigo-500', action: "triggerUpload()", customClass: "border-2 border-dashed border-white/20 bg-white/5", x: 20, y: 200 },
+                { id: 'EXPORT', label: '导出系统', icon: 'save', color: 'text-emerald-500', action: "exportSystem()", customClass: "border border-emerald-500/30 bg-emerald-500/5", x: 20, y: 290 },
+                { id: 'SETTINGS', label: '系统设置', icon: 'settings', color: 'text-slate-300', action: "openApp('SETTINGS')", x: 20, y: 380 }
+            ],
+            selectedFileIndex: null, 
+            selectedSystemIconId: null,
+            modalCallback: null 
+        };
+
+        const GRID_SIZE = 90; 
+
+        // --- 核心初始化 ---
+        async function init() {
+            // 加载预设数据
+            if (PRESET_DATA && Array.isArray(PRESET_DATA)) {
+                // 显示加载进度
+                const overlay = document.getElementById('loading-overlay');
+                const loadingText = document.getElementById('loading-text');
+                overlay.classList.remove('hidden');
+                loadingText.textContent = "正在恢复系统文件...";
+
+                for (let i = 0; i < PRESET_DATA.length; i++) {
+                    const file = PRESET_DATA[i];
+                    try {
+                        const response = await fetch(file.base64);
+                        const blob = await response.blob();
+                        state.uploadedFiles.push({
+                            ...file,
+                            url: URL.createObjectURL(blob),
+                            originFile: new File([blob], file.name, { type: file.type })
+                        });
+                    } catch (e) {
+                        console.error("恢复文件失败:", file.name, e);
+                    }
+                }
+                overlay.classList.add('hidden');
+            }
+
+            renderDesktop();
+            renderStartMenu();
+            updateClock();
+            setInterval(updateClock, 1000);
+            lucide.createIcons();
+            
+            window.addEventListener('keydown', handleGlobalKeydown);
+        }
+
+        // --- 系统导出逻辑 (修复版本) ---
+        async function exportSystem() {
+            const overlay = document.getElementById('loading-overlay');
+            const loadingText = document.getElementById('loading-text');
+            overlay.classList.remove('hidden');
+            loadingText.textContent = "正在生成系统镜像...";
+            
+            try {
+                // 1. 将文件转换为 Base64
+                const serializedFiles = [];
+                for (const file of state.uploadedFiles) {
+                    const base64 = await fileToBase64(file.originFile);
+                    serializedFiles.push({
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                        x: file.x,
+                        y: file.y,
+                        base64: base64
+                    });
+                }
+
+                // 2. 先隐藏当前的加载遮罩和所有窗口，以免被 outerHTML 捕获为“显示状态”
+                overlay.classList.add('hidden');
+                
+                // 3. 获取源代码并克隆文档对象进行清理
+                let source = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+
+                // 4. 清理捕获到的 HTML (移除运行时的动态 DOM 状态)
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(source, 'text/html');
+                
+                // 确保导出的文件不包含已打开的窗口和遮罩状态
+                doc.getElementById('window-container').innerHTML = '';
+                doc.getElementById('taskbar-apps').innerHTML = '';
+                doc.getElementById('desktop-icons').innerHTML = '';
+                const exportOverlay = doc.getElementById('loading-overlay');
+                if (exportOverlay) exportOverlay.classList.add('hidden');
+                
+                let cleanSource = "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
+
+                // 5. 注入数据 (使用函数方式替换，避免 $ 字符被识别为正则指令)
+                const jsonFiles = JSON.stringify(serializedFiles);
+                const injection = `const PRESET_DATA = ${jsonFiles};`;
+                const regex = /const PRESET_DATA = [\s\S]*?\/\* PRESET_DATA_INJECTION \*\//;
+                
+                const finalSource = cleanSource.replace(regex, () => `${injection} /* PRESET_DATA_INJECTION */`);
+
+                // 6. 触发下载
+                const blob = new Blob([finalSource], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `WebOS_FullBackup_${new Date().getTime()}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showModal('导出成功', '您的系统镜像已下载。该文件包含了您所有的上传文件和桌面布局。');
+            } catch (err) {
+                console.error(err);
+                showModal('导出失败', '生成系统镜像时出错。');
+            } finally {
+                overlay.classList.add('hidden');
+            }
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
+        }
+
+        // --- 交互逻辑 ---
+        function handleGlobalClick(e) {
+            if (e.target === document.body || e.target.id === 'desktop-icons') {
+                state.selectedFileIndex = null;
+                state.selectedSystemIconId = null;
+                renderDesktop(); 
+            }
+            closeFileMenu();
+        }
+
+        function handleGlobalKeydown(e) {
+            if (e.key === 'Delete') {
+                if (state.selectedFileIndex !== null) {
+                    confirmDeleteFile(state.selectedFileIndex);
+                }
+            }
+        }
+
+        function selectIcon(e, type, idOrIndex) {
+            e.stopPropagation();
+            if (type === 'file') {
+                state.selectedFileIndex = idOrIndex;
+                state.selectedSystemIconId = null;
+            } else {
+                state.selectedSystemIconId = idOrIndex;
+                state.selectedFileIndex = null;
+            }
+            renderDesktop();
+            if (type === 'file') showFileMenu(e, idOrIndex);
+        }
+
+        function showModal(title, message, type = 'info', onConfirm = null) {
+            const modal = document.getElementById('system-modal');
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            state.modalCallback = onConfirm;
+            const actions = document.getElementById('modal-actions');
+            actions.innerHTML = type === 'confirm' 
+                ? `<button onclick="closeModal()" class="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded text-sm hover:bg-slate-300">取消</button><button onclick="execModalConfirm()" class="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">确定</button>`
+                : `<button onclick="closeModal()" class="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">确定</button>`;
+            modal.classList.remove('hidden');
+        }
+        function closeModal() { document.getElementById('system-modal').classList.add('hidden'); state.modalCallback = null; }
+        function execModalConfirm() { if (state.modalCallback) state.modalCallback(); closeModal(); }
+
+        function renderDesktop() {
+            const desktop = document.getElementById('desktop-icons');
+            let html = '';
+            state.systemIcons.forEach(icon => {
+                const isSelected = state.selectedSystemIconId === icon.id;
+                const cls = `desktop-icon w-20 p-2 flex flex-col items-center gap-1.5 rounded-lg transition-transform group hover:bg-white/10 ${isSelected ? 'icon-selected' : ''} ${icon.customClass || ''}`;
+                html += `
+                <div class="${cls}" style="left: ${icon.x}px; top: ${icon.y}px;" onmousedown="startIconDrag(event, 'system', '${icon.id}')" ondblclick="${icon.action}" onclick="selectIcon(event, 'system', '${icon.id}')">
+                    <div class="p-1 drop-shadow-md ${icon.color} pointer-events-none"><i data-lucide="${icon.icon}" class="w-9 h-9"></i></div>
+                    <span class="text-[10px] text-white text-center font-semibold drop-shadow-md px-1 truncate w-full select-none pointer-events-none">${escapeHtml(icon.label)}</span>
+                </div>`;
+            });
+            state.uploadedFiles.forEach((file, index) => {
+                let icon = 'file'; let color = 'text-slate-200';
+                if (file.type.startsWith('image/')) { icon = 'image'; color = 'text-purple-400'; }
+                else if (file.type.includes('html')) { icon = 'code'; color = 'text-orange-400'; }
+                else if (file.type.includes('text')) { icon = 'file-text'; color = 'text-white'; }
+                const isSelected = state.selectedFileIndex === index;
+                const cls = `desktop-icon w-20 p-2 flex flex-col items-center gap-1.5 rounded-lg transition-transform group hover:bg-white/10 ${isSelected ? 'icon-selected' : 'bg-white/5'}`;
+                html += `
+                <div class="${cls}" style="left: ${file.x}px; top: ${file.y}px;" onmousedown="startIconDrag(event, 'file', ${index})" onclick="selectIcon(event, 'file', ${index})" ondblclick="openUploadedFile(${index})" oncontextmenu="event.preventDefault(); selectIcon(event, 'file', ${index})">
+                    <div class="p-1 drop-shadow-md ${color} pointer-events-none"><i data-lucide="${icon}" class="w-9 h-9"></i></div>
+                    <span class="text-[10px] text-white text-center font-semibold drop-shadow-md px-1 truncate w-full select-none pointer-events-none">${escapeHtml(file.name)}</span>
+                    ${isSelected ? '<div class="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full"></div>' : ''}
+                </div>`;
+            });
+            desktop.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        let iconDragInfo = null;
+        function startIconDrag(e, type, idOrIndex) {
+            if (e.button !== 0) return; 
+            const el = e.currentTarget; const rect = el.getBoundingClientRect();
+            iconDragInfo = { type, idOrIndex, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top, el };
+            window.addEventListener('mousemove', handleIconDragMove);
+            window.addEventListener('mouseup', stopIconDrag);
+        }
+        function handleIconDragMove(e) {
+            if (!iconDragInfo) return;
+            const { el, offsetX, offsetY } = iconDragInfo;
+            let newX = e.clientX - offsetX, newY = e.clientY - offsetY;
+            if (newX < 0) newX = 0; if (newY < 0) newY = 0;
+            el.style.left = newX + 'px'; el.style.top = newY + 'px'; el.style.zIndex = 100;
+        }
+        function stopIconDrag() {
+            if (!iconDragInfo) return;
+            const { type, idOrIndex, el } = iconDragInfo;
+            const x = parseInt(el.style.left), y = parseInt(el.style.top);
+            if (type === 'system') { const icon = state.systemIcons.find(i => i.id === idOrIndex); if (icon) { icon.x = x; icon.y = y; } }
+            else { const file = state.uploadedFiles[idOrIndex]; if (file) { file.x = x; file.y = y; } }
+            el.style.zIndex = ''; iconDragInfo = null;
+            window.removeEventListener('mousemove', handleIconDragMove); window.removeEventListener('mouseup', stopIconDrag);
+        }
+
+        function triggerUpload() { document.getElementById('upload-input').click(); }
+        function handleFilesSelected(input) {
+            const files = Array.from(input.files); if (files.length === 0) return;
+            let startX = 110, startY = 20; const occupied = [...state.systemIcons, ...state.uploadedFiles];
+            files.forEach(file => {
+                let placed = false;
+                while (!placed) {
+                    const conflict = occupied.find(o => Math.abs(o.x - startX) < 20 && Math.abs(o.y - startY) < 20);
+                    if (!conflict) { placed = true; } else { startY += GRID_SIZE; if (startY > window.innerHeight - 100) { startY = 20; startX += GRID_SIZE; } }
+                }
+                const newFile = { name: file.name, type: file.type, size: file.size, url: URL.createObjectURL(file), originFile: file, x: startX, y: startY };
+                state.uploadedFiles.push(newFile); occupied.push(newFile);
+                startY += GRID_SIZE; if (startY > window.innerHeight - 100) { startY = 20; startX += GRID_SIZE; }
+            });
+            renderDesktop(); input.value = '';
+        }
+
+        function confirmDeleteFile(index) {
+            const file = state.uploadedFiles[index]; if (!file) return;
+            showModal('确认删除', `确定要删除 "${file.name}" 吗？`, 'confirm', () => {
+                URL.revokeObjectURL(file.url); state.uploadedFiles.splice(index, 1); state.selectedFileIndex = null; renderDesktop();
+            });
+        }
+
+        function showFileMenu(e, index) {
+            const menu = document.getElementById('file-context-menu');
+            const file = state.uploadedFiles[index]; if (!file) return;
+            let menuHtml = `<button id="menu-btn-open" class="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-blue-500 hover:text-white transition-colors flex items-center gap-2"><i data-lucide="external-link" class="w-3 h-3"></i> 打开</button>`;
+            if (file.type.includes('html') || file.name.endsWith('.html')) menuHtml += `<button id="menu-btn-run" class="w-full text-left px-4 py-2 text-sm text-orange-600 dark:text-orange-400 hover:bg-orange-500 hover:text-white transition-colors flex items-center gap-2"><i data-lucide="play" class="w-3 h-3"></i> 运行</button>`;
+            menuHtml += `<button id="menu-btn-download" class="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-blue-500 hover:text-white transition-colors flex items-center gap-2"><i data-lucide="download" class="w-3 h-3"></i> 下载</button>
+                <div class="h-px bg-slate-200 dark:bg-slate-700 my-1"></div>
+                <button id="menu-btn-delete" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-500 hover:text-white transition-colors flex items-center gap-2"><i data-lucide="trash-2" class="w-3 h-3"></i> 删除 <span class="text-xs ml-auto opacity-50">Del</span></button>`;
+            menu.innerHTML = menuHtml; lucide.createIcons();
+            document.getElementById('menu-btn-open').onclick = () => { openUploadedFile(index); closeFileMenu(); };
+            if (document.getElementById('menu-btn-run')) document.getElementById('menu-btn-run').onclick = () => { runHtmlFile(index); closeFileMenu(); };
+            document.getElementById('menu-btn-download').onclick = () => { downloadFile(index); closeFileMenu(); };
+            document.getElementById('menu-btn-delete').onclick = () => { confirmDeleteFile(index); closeFileMenu(); };
+            let x = e.clientX + 5, y = e.clientY + 5; if (x + 150 > window.innerWidth) x = window.innerWidth - 160; if (y + 160 > window.innerHeight) y = window.innerHeight - 170;
+            menu.style.left = x + 'px'; menu.style.top = y + 'px'; menu.classList.remove('hidden');
+        }
+        function closeFileMenu() { document.getElementById('file-context-menu').classList.add('hidden'); }
+        function openUploadedFile(index) {
+            const file = state.uploadedFiles[index]; if (!file) return;
+            if (file.type.startsWith('image/')) openViewer(file);
+            else if (file.type.startsWith('text/') || file.name.endsWith('.html') || file.name.endsWith('.js') || file.name.endsWith('.css') || file.name.endsWith('.md')) openNotepadWithContent(file);
+            else showModal('提示', `无法预览文件 "${file.name}"。`);
+        }
+        function runHtmlFile(index) { const file = state.uploadedFiles[index]; if (file) openApp('EDGE', { url: file.url, title: file.name }); }
+        function downloadFile(index) { const file = state.uploadedFiles[index]; const a = document.createElement('a'); a.href = file.url; a.download = file.name; document.body.appendChild(a); a.click(); document.body.removeChild(a); }
+
+        function escapeHtml(str) { return str ? str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;") : ''; }
+        function updateClock() { const now = new Date(); document.getElementById('clock-time').textContent = now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}); document.getElementById('clock-date').textContent = now.toLocaleDateString('zh-CN'); }
+        function openApp(appId, params = {}) {
+            if (state.openWindows[appId] && appId!=='NOTEPAD' && appId!=='VIEWER') {
+                if(state.openWindows[appId].isMinimized) { state.openWindows[appId].isMinimized = false; document.getElementById(`win-${appId}`).classList.remove('minimized'); }
+                focusWindow(appId); if (appId === 'EDGE' && params.url) { refreshEdge(appId, params.url); } return;
+            }
+            if (state.openWindows[appId]) closeWindow(appId);
+            const config = APPS[appId]; state.openWindows[appId] = { appId, isMaximized: false, isMinimized: false, zIndex: ++state.zIndexCounter, pos: { x: 100 + (Math.random()*50), y: 50 + (Math.random()*50) }, size: { w: config.initialSize.w, h: config.initialSize.h }, params };
+            createWindowElement(appId); focusWindow(appId); updateTaskbar(); toggleStartMenu(false);
+        }
+
+        function createWindowElement(appId) {
+            const winData = state.openWindows[appId], appConfig = APPS[appId], container = document.getElementById('window-container');
+            let title = appConfig.name; if (winData.params.fileName) title += ` - ${winData.params.fileName}`; if (winData.params.title) title += ` - ${winData.params.title}`;
+            const win = document.createElement('div'); win.id = `win-${appId}`; win.className = `window fixed pointer-events-auto flex flex-col overflow-hidden bg-white/90 dark:bg-slate-900/95 backdrop-blur-2xl rounded-xl border border-white/20 shadow-2xl`;
+            win.style.cssText = `left:${winData.pos.x}px; top:${winData.pos.y}px; width:${winData.size.w}px; height:${winData.size.h}px; z-index:${winData.zIndex}`;
+            win.onmousedown = () => focusWindow(appId);
+            win.innerHTML = `
+                <div class="h-10 flex items-center justify-between px-3 select-none cursor-default bg-white/30 dark:bg-slate-800/30 border-b border-white/10 win-titlebar" onmousedown="startWinDrag(event, '${appId}')" ondblclick="toggleMaximize('${appId}')">
+                    <div class="flex items-center gap-2"><i data-lucide="${appConfig.icon}" class="w-4 h-4 ${appConfig.color}"></i><span class="text-sm font-medium text-slate-700 dark:text-slate-200 truncate max-w-[200px]">${escapeHtml(title)}</span></div>
+                    <div class="flex items-center gap-1 pointer-events-auto"><button onclick="minimizeWindow('${appId}')" class="p-2 hover:bg-slate-200/50 rounded"><i data-lucide="minus" class="w-3.5 h-3.5"></i></button><button onclick="toggleMaximize('${appId}')" class="p-2 hover:bg-slate-200/50 rounded"><i data-lucide="square" class="w-3 h-3"></i></button><button onclick="closeWindow('${appId}')" class="p-2 hover:bg-red-500 hover:text-white rounded"><i data-lucide="x" class="w-3.5 h-3.5"></i></button></div>
+                </div>
+                <div class="flex-1 overflow-auto bg-transparent relative flex flex-col" id="content-${appId}">${getAppContent(appId, winData.params)}</div>`;
+            container.appendChild(win); lucide.createIcons();
+            if(appId==='TERMINAL') initTerminal(appId); if(appId==='CALC') initCalculator(appId); if(appId==='EDGE') initEdgeListeners(appId);
+        }
+
+        let winDrag = null;
+        function startWinDrag(e, appId) { if(state.openWindows[appId].isMaximized) return; const win = document.getElementById(`win-${appId}`); winDrag = { appId, startX: e.clientX - win.offsetLeft, startY: e.clientY - win.offsetTop }; win.classList.add('dragging'); window.addEventListener('mousemove', handleWinDrag); window.addEventListener('mouseup', stopWinDrag); }
+        function handleWinDrag(e) { if(!winDrag) return; const win = document.getElementById(`win-${winDrag.appId}`); win.style.left = (e.clientX - winDrag.startX) + 'px', win.style.top = (e.clientY - winDrag.startY) + 'px'; state.openWindows[winDrag.appId].pos = {x:parseInt(win.style.left), y:parseInt(win.style.top)}; }
+        function stopWinDrag() { if(winDrag) document.getElementById(`win-${winDrag.appId}`).classList.remove('dragging'); winDrag = null; window.removeEventListener('mousemove', handleWinDrag); window.removeEventListener('mouseup', stopWinDrag); }
+
+        function focusWindow(id) {
+            if(state.activeWindow === id) return; state.activeWindow = id; state.zIndexCounter++; if(state.openWindows[id]) state.openWindows[id].zIndex = state.zIndexCounter;
+            const win = document.getElementById(`win-${id}`); if(win) { win.style.zIndex = state.zIndexCounter; document.querySelectorAll('.window').forEach(w => w.classList.remove('ring-1', 'ring-blue-500/50')); win.classList.add('ring-1', 'ring-blue-500/50'); } updateTaskbar();
+        }
+        function closeWindow(id) { document.getElementById(`win-${id}`)?.remove(); delete state.openWindows[id]; if(state.activeWindow===id) state.activeWindow=null; updateTaskbar(); }
+        function minimizeWindow(id) { document.getElementById(`win-${id}`).classList.add('minimized'); state.openWindows[id].isMinimized=true; state.activeWindow=null; updateTaskbar(); }
+        function toggleMaximize(id) {
+            const win = document.getElementById(`win-${id}`), d = state.openWindows[id];
+            if(d.isMaximized) { win.style.cssText = `left:${d.pos.x}px; top:${d.pos.y}px; width:${d.size.w}px; height:${d.size.h}px; z-index:${d.zIndex}`; win.classList.add('rounded-xl'); win.classList.remove('rounded-none'); }
+            else { win.style.cssText = `left:0; top:0; width:100%; height:calc(100% - 48px); z-index:${d.zIndex}`; win.classList.remove('rounded-xl'); win.classList.add('rounded-none'); }
+            d.isMaximized = !d.isMaximized;
+        }
+        function minimizeAll() { Object.keys(state.openWindows).forEach(id => minimizeWindow(id)); }
+        function renderStartMenu() { const container = document.getElementById('pinned-apps'), menuApps = ['EDGE', 'EXPLORER', 'CALC', 'TERMINAL', 'NOTEPAD', 'SETTINGS']; container.innerHTML = menuApps.map(id => { const app = APPS[id]; return `<button onclick="openApp('${id}')" class="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-white/10 transition-all group active:scale-90"><div class="transform transition-transform group-hover:scale-110 drop-shadow-md ${app.color}"><i data-lucide="${app.icon}" class="w-7 h-7"></i></div><span class="text-[11px] text-white/90 font-medium">${app.name}</span></button>`; }).join(''); }
+        function updateTaskbar() {
+            document.getElementById('taskbar-apps').innerHTML = Object.entries(APPS).map(([id, app]) => { if(id==='VIEWER'&&!state.openWindows[id])return''; if(!state.openWindows[id] && !['EXPLORER','EDGE','NOTEPAD','SETTINGS','CALC','TERMINAL'].includes(id)) return ''; const active = state.activeWindow === id; return `<button onclick="openApp('${id}')" class="relative w-10 h-10 flex items-center justify-center rounded-lg group transition-all duration-200 ${active?'bg-white/15':'hover:bg-white/10'}"><div class="transform transition-transform group-hover:scale-110 ${app.color}"><i data-lucide="${app.icon}" class="w-5 h-5"></i></div>${state.openWindows[id]?`<div class="absolute bottom-0.5 w-1 h-1 bg-blue-400 rounded-full"></div>`:''}</button>`; }).join(''); lucide.createIcons();
+        }
+        function toggleStartMenu(f){const m=document.getElementById('start-menu');state.isStartOpen=f!==undefined?f:!state.isStartOpen; if(state.isStartOpen)m.classList.remove('hidden');else m.classList.add('hidden');}
+        function setWallpaper(u){document.body.style.backgroundImage=`url('${u}')`;}
+        function openViewer(f){openApp('VIEWER',{fileUrl:f.url,fileName:f.name});}
+        function openNotepadWithContent(f){const r=new FileReader();r.onload=e=>openApp('NOTEPAD',{initialText:e.target.result,title:f.name});r.readAsText(f.originFile);}
+
+        function getAppContent(appId, params) {
+            switch(appId) {
+                case 'EDGE':
+                    if (params.url) return `<div class="flex flex-col h-full bg-slate-50"><div class="bg-white p-2 flex items-center gap-2 border-b border-slate-200 shadow-sm z-10"><div class="flex gap-2"><button class="p-1 hover:bg-slate-100 rounded text-slate-500"><i data-lucide="arrow-left" class="w-4 h-4"></i></button><button class="p-1 hover:bg-slate-100 rounded text-slate-500"><i data-lucide="rotate-cw" class="w-4 h-4"></i></button></div><div class="flex-1 bg-slate-100 rounded-full border border-transparent focus-within:border-blue-500 focus-within:bg-white transition-all px-4 py-1.5 flex items-center gap-2"><i data-lucide="lock" class="w-3 h-3 text-green-600"></i><input type="text" id="edge-input-${appId}" value="${params.url}" class="flex-1 bg-transparent outline-none text-xs text-slate-700" onkeydown="handleEdgeInput(event, '${appId}')"></div><button class="p-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-xs px-3" onclick="window.open('${params.url}', '_blank')">在新标签页打开</button></div><div class="flex-1 relative bg-white"><iframe id="edge-frame-${appId}" src="${params.url}" class="w-full h-full border-none" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe></div></div>`;
+                    return `<div class="flex flex-col h-full bg-cover bg-center relative" style="background-image: url('https://images.unsplash.com/photo-1470770841072-f978cf4d019e?auto=format&fit=crop&q=80&w=2070')"><div class="absolute inset-0 bg-black/20"></div><div class="relative z-10 flex flex-col h-full"><div class="flex justify-between items-center p-4 text-white text-sm"><div class="flex gap-4"><span>图片</span><span>视频</span><span>地图</span></div><div class="flex gap-4 items-center"><span>设置</span><div class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold">A</div></div></div><div class="flex-1 flex flex-col items-center justify-center pb-20"><h1 class="text-6xl font-bold text-white mb-8 drop-shadow-lg" style="font-family: 'Segoe UI', sans-serif;">Bing</h1><div class="w-full max-w-xl relative"><input type="text" class="w-full h-12 pl-5 pr-12 rounded-full border-none outline-none shadow-lg text-slate-700 text-base focus:ring-2 focus:ring-blue-400/50 transition-all" placeholder="搜索网页..." onkeydown="handleEdgeInput(event, '${appId}')"><button class="absolute right-1.5 top-1.5 w-9 h-9 flex items-center justify-center hover:bg-slate-100 rounded-full text-blue-600"><i data-lucide="search" class="w-5 h-5"></i></button></div></div></div></div>`;
+                case 'EXPLORER': return `<div class="p-6 grid grid-cols-4 gap-4">${['文档','下载','图片','音乐'].map(f=>`<div class="flex flex-col items-center p-4 hover:bg-blue-50 rounded"><i data-lucide="folder" class="w-10 h-10 text-blue-500 mb-2"></i><span class="text-xs">${f}</span></div>`).join('')}</div>`;
+                case 'NOTEPAD': return `<textarea class="w-full h-full p-6 outline-none resize-none font-mono text-sm leading-relaxed">${escapeHtml(params.initialText||'')}</textarea>`;
+                case 'VIEWER': return `<div class="flex-1 bg-black flex items-center justify-center"><img src="${params.fileUrl}" class="max-w-full max-h-full object-contain"></div>`;
+                case 'TERMINAL': return `<div class="h-full bg-slate-950 text-emerald-500 font-mono p-4 text-sm"><div id="term-out-${appId}">WebOS Kernel 1.0</div><div class="flex mt-1"><span>$ </span><input class="bg-transparent border-none outline-none text-white flex-1 ml-2" onkeydown="handleTerm(event)"></div></div>`;
+                case 'CALC': return `<div id="calc-${appId}" class="p-4 h-full flex flex-col"><div class="bg-slate-100 p-4 text-right text-2xl mb-4 rounded calc-display">0</div><div class="grid grid-cols-4 gap-2 flex-1 calc-btns"></div></div>`;
+                case 'SETTINGS': return `<div class="p-8"><h3 class="font-bold mb-4">壁纸</h3><div class="grid grid-cols-2 gap-4">${WALLPAPERS.map(u=>`<div onclick="setWallpaper('${u}')" class="aspect-video bg-cover rounded cursor-pointer border-2 border-transparent hover:border-blue-500" style="background-image:url(${u})"></div>`).join('')}</div></div>`;
+                default: return '';
+            }
+        }
+        function initEdgeListeners(id) {}
+        function handleEdgeInput(e, id) { if(e.key === 'Enter') { let v = e.target.value.trim(); if (!v) return; let url = (v.match(/^http(s)?:\/\//) || v.match(/^www\./) || v.includes('.com')) ? (!v.startsWith('http') ? 'https://'+v : v) : 'https://www.bing.com/search?q='+encodeURIComponent(v); openApp('EDGE', { url }); } }
+        function refreshEdge(id, url) { const c = document.getElementById(`content-${id}`), f = document.getElementById(`edge-frame-${id}`), i = document.getElementById(`edge-input-${id}`); if (f && i) { i.value = url; f.src = url; } else { c.innerHTML = getAppContent(id, { url }); initEdgeListeners(id); } }
+        function initTerminal(id) { const w = document.getElementById(`win-${id}`), i = w ? w.querySelector('input') : null; if (i) i.focus(); }
+        function initCalculator(id) { const c = document.querySelector(`#calc-${id} .calc-btns`); ['C','/','*','-','7','8','9','+','4','5','6','=','1','2','3','0'].forEach(b=>{ c.innerHTML += `<button class="bg-slate-50 hover:bg-slate-100 rounded font-bold ${b==='='?'row-span-2 bg-blue-500 text-white hover:bg-blue-600':''}" onclick="calcClick('${id}', '${b}')">${b}</button>`; }); }
+        function calcClick(id, b) { const d = document.querySelector(`#calc-${id} .calc-display`); if(b==='C') d.innerText='0'; else if(b==='=') try{d.innerText=eval(d.innerText)}catch{d.innerText='Err'} else d.innerText = d.innerText==='0'?b:d.innerText+b; }
+        function handleTerm(e) { if(e.key==='Enter'){ const v=e.target.value; e.target.value=''; const out=e.target.parentElement.previousElementSibling; out.innerHTML += `<div>$ ${v}</div>`; if(v==='help') out.innerHTML+=`<div class="text-slate-400">help, date, clear</div>`; else if(v==='clear') out.innerHTML=''; else if(v==='date') out.innerHTML+=`<div>${new Date()}</div>`; } }
+        window.onload = init;
+    </script>
+</body>
+</html>

@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<!-- 
+  🌍 告诉浏览器：我们要开始用 HTML 这种语言来写网页啦！
+  HTML 就像是房子的骨架。
+-->
+<html lang="zh"> <!-- 设置语言为中文 -->
+<head>
+    <meta charset="UTF-8"> <!-- 🔤 告诉浏览器不要乱码，要用通用的字符集 -->
+    <!-- 📱 下面这行是让游戏在手机屏幕上也能自动缩放，看清楚 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 贪吃蛇 - 中文注释版</title>
+    
+    <!-- 🎨 引入 p5.js 这个工具库。
+         这就好比我们不用自己造画笔和颜料，直接借用这一套好用的工具来画画。 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    
+    <!-- 💅 <style> 里面写的是 CSS，就像是给房子搞装修。
+         决定了背景是什么颜色，字有多大。 -->
+    <style>
+        body {
+            margin: 0;          /* 不要留白边 */
+            padding: 0;         /* 不要留内衬 */
+            background-color: #111; /* ⬛️ 背景设为深黑色 */
+            color: #eee;        /* ⬜️ 文字设为灰白色 */
+            font-family: 'Segoe UI', monospace; /* 字体样式 */
+            overflow: hidden;   /* 如果内容太多，藏起来不要出现滚动条 */
+            display: flex;      /* 📦 让内容像积木一样排列 */
+            justify-content: center; /* ↔️ 水平居中 */
+            align-items: center;     /* ↕️ 垂直居中 */
+            height: 100vh;      /* 占满整个屏幕的高度 */
+        }
+        #canvas-container {
+            position: relative; /* 📍 这是一个定位基准点 */
+            box-shadow: 0 0 40px rgba(0,0,0,0.8); /* 给游戏框加个帅气的阴影 */
+            border: 2px solid #333; /* 加个深灰色的边框 */
+        }
+        /* 🎮 下面是游戏左上角那个信息框的样式 */
+        #ui-layer {
+            position: absolute; /* 绝对定位，悬浮在画布上面 */
+            top: 15px;          /* 距离顶部 15像素 */
+            left: 15px;         /* 距离左边 15像素 */
+            background: rgba(0, 0, 0, 0.85); /* 半透明黑色背景 */
+            padding: 15px 20px; /* 里面的字离边框远一点 */
+            border-radius: 8px; /*把角磨圆一点 */
+            pointer-events: none; /* 鼠标点不中它，直接穿透到游戏里 */
+            border-left: 4px solid #4CAF50; /* 左边加条绿线装饰 */
+            backdrop-filter: blur(4px); /*以此背景做一点模糊效果 */
+        }
+        h1 { margin: 0 0 10px 0; font-size: 22px; color: #4CAF50; letter-spacing: 1px; text-transform: uppercase; }
+        p { margin: 5px 0; font-size: 16px; color: #ddd; }
+        .status-ok { color: #4CAF50; font-weight: bold; } /* ✅ 状态正常：绿色 */
+        .status-warn { color: #FFC107; font-weight: bold; } /* ⚠️ 状态警告：黄色 */
+        .status-dead { color: #F44336; font-weight: bold; } /* ☠️ 挂了：红色 */
+        .keys { font-size: 12px; color: #777; margin-top: 12px; padding-top: 8px; border-top: 1px solid #333;}
+    </style>
+</head>
+<body>
+
+    <!-- 🖼️ 这里是游戏显示的容器 -->
+    <div id="canvas-container">
+        <div id="ui-layer">
+            <h1>🤖 AI 智能贪吃蛇 v2.0</h1>
+            <p>分数: <span id="score">0</span></p>
+            <p>状态: <span id="status" class="status-ok">运行中</span></p>
+            <p class="keys">[R] 重来 | [P] 暂停</p>
+        </div>
+    </div>
+
+    <!-- 🧠 <script> 里面是 JavaScript，这里是游戏的大脑和逻辑！ -->
+    <script>
+        // --- ⚙️ 配置区 (就像游戏设置) ---
+        const COLS = 20; // 🏁 地图横着切成20格
+        const ROWS = 20; // 🏁 地图竖着切成20格
+        const FPS = 20;  // ⏱️ 游戏速度：每秒刷新20次 (帧率)
+        const OBSTACLE_COUNT = 8; // 🧱 墙壁障碍物的数量
+
+        // --- 📦 全局变量 (大家的公共背包，谁都能用里面的东西) ---
+        let cellW, cellH; // 📏 每一小格子的宽度和高度
+        let snake;        // 🐍 我们的主角：蛇
+        let food;         // 🍎 食物
+        let walls = [];   // 🧱 所有的墙都在这个列表里
+        let grid = [];    // 🗺️ 整个地图网格数据
+        let path = [];    // 📍 蛇脑子里的导航路线 (GPS路径)
+        let isPaused = false;   // ⏸️ 是否暂停了？
+        let isGameOver = false; // 💀 游戏结束了吗？
+        let score = 0;          // 💯 得分
+        
+        let scoreEl, statusEl;  // 用来控制网页上文字显示的变量
+
+        // 🎬 SETUP 函数：游戏启动时只运行一次，相当于“准备工作”
+        function setup() {
+            // 创建画布
+            let size = min(windowWidth, windowHeight) * 0.95; // 算一下屏幕大小，取95%防止太满
+            let canvas = createCanvas(size, size); // 🎨 创建画板
+            canvas.parent('canvas-container');     // 把画板挂到网页的框框里
+            frameRate(FPS); // 设定速度
+            
+            // 找到网页上显示分数和状态的地方
+            scoreEl = document.getElementById('score');
+            statusEl = document.getElementById('status');
+
+            // ▶️ 开始游戏！
+            resetGame();
+        }
+
+        // 📏 当你改变浏览器窗口大小时，自动调整游戏大小
+        function windowResized() {
+            let size = min(windowWidth, windowHeight) * 0.95;
+            resizeCanvas(size, size);
+            cellW = width / COLS;  // 重新计算格子宽度
+            cellH = height / ROWS; // 重新计算格子高度
+        }
+
+        // 🔄 重置游戏：把一切归零
+        function resetGame() {
+            cellW = width / COLS;
+            cellH = height / ROWS;
+            score = 0;
+            isGameOver = false;
+            isPaused = false;
+            path = [];
+            if(scoreEl) scoreEl.innerText = score; // 更新网页上的分数为0
+            updateStatus("寻找食物中...", "status-ok");
+
+            // 🏗️ 初始化网格地图 (把地图切成一个个小方块对象)
+            grid = new Array(COLS);
+            for (let i = 0; i < COLS; i++) {
+                grid[i] = new Array(ROWS);
+                for (let j = 0; j < ROWS; j++) {
+                    grid[i][j] = new Node(i, j); // 每个格子都是一个“节点”
+                }
+            }
+            // 🤝 让每个格子都认识它的邻居 (为了寻路算法知道哪儿通哪儿不通)
+            for (let i = 0; i < COLS; i++) {
+                for (let j = 0; j < ROWS; j++) {
+                    grid[i][j].addNeighbors(grid);
+                }
+            }
+
+            snake = new Snake(); // 🐣 孵化一条新蛇
+            generateWalls();     // 🧱 造几堵墙
+            spawnFoodSmart();    // 🍎 聪明地生成食物 (不生在墙里)
+            calculatePath();     // 🗺️ 开启第一次导航
+        }
+
+        // 🎬 DRAW 函数：这是游戏的心脏，每秒钟运行 20 次
+        function draw() {
+            background(25); // 🧹 每一帧先用深灰色把屏幕涂满 (擦黑板)
+
+            // 如果游戏结束了，画完画面就停下，不继续跑逻辑了
+            if (isGameOver) {
+                drawGameElements(); // 画蛇、墙、食物
+                drawOverlay("GAME OVER", "按 'R' 键重新开始"); // 显示结束文字
+                return;
+            }
+
+            // 如果暂停了
+            if (isPaused) {
+                drawGameElements();
+                drawOverlay("PAUSED", "按 'P' 键继续");
+                return;
+            }
+
+            // --- 核心循环逻辑 (蛇的大脑在思考) ---
+            
+            // 1. 🗺️ 规划路径：看看怎么走能吃到苹果
+            calculatePath(); 
+            
+            // 2. 🧭 决定下一步：根据导航或者安全策略迈出脚
+            let nextMove = getNextMove();
+
+            if (nextMove) {
+                // 告诉蛇：往这边转！
+                snake.setDir(nextMove.x, nextMove.y);
+            }
+
+            // 3. 🏃 更新物理位置：蛇真的动起来了
+            snake.update();
+
+            // 4. 💥 碰撞检测：头是不是撞墙了？
+            if (snake.checkCollision(walls)) {
+                gameOver();
+            }
+
+            // 5. 🍽️ 吃饭检测：是不是吃到苹果了？
+            if (snake.eat(food)) {
+                snake.grow(); // 身体变长
+                score++;      // 分数加1
+                scoreEl.innerText = score; // 网页显示更新
+                spawnFoodSmart(); // 生成下一个苹果
+            }
+
+            // 6. 🎨 渲染：把所有算好的东西画出来
+            drawGameElements();
+        }
+
+        // 🖌️ 专门负责“画画”的函数
+        function drawGameElements() {
+            drawGrid();  // 画网格线
+            drawWalls(); // 画墙
+            drawPath();  // 画那条黄色的导航线 (让你看到AI在想什么)
+            drawFood();  // 画苹果
+            snake.show(); // 画蛇
+        }
+
+        // 🖌️ 画覆盖层 (比如 Game Over 时的黑框)
+        function drawOverlay(title, subtitle) {
+            fill(0, 0, 0, 180); // 半透明黑
+            rect(0, 0, width, height); // 盖住全屏
+            fill(255); // 白色字
+            noStroke();
+            textAlign(CENTER, CENTER); // 文字居中
+            textSize(width/12); // 大标题字号
+            text(title, width/2, height/2 - 20);
+            textSize(width/28); // 副标题字号
+            fill(200); // 浅灰色
+            text(subtitle, width/2, height/2 + 40);
+        }
+
+        // ⌨️ 键盘监听：当玩家按下键盘时触发
+        function keyPressed() {
+            if (key === 'r' || key === 'R') resetGame(); // 按R重开
+            if (key === 'p' || key === 'P') isPaused = !isPaused; // 按P暂停
+        }
+
+        // --- 🐍 实体类：定义蛇是什么 ---
+
+        class Snake {
+            constructor() {
+                this.body = [];
+                // 📍 蛇出生在地图正中间
+                let startX = floor(COLS / 2);
+                let startY = floor(ROWS / 2);
+                this.body[0] = createVector(startX, startY); // 蛇头位置
+                this.xDir = 0; // X轴移动方向 (不动)
+                this.yDir = 0; // Y轴移动方向 (不动)
+                this.growCount = 0; // 还要长几节身体？
+            }
+
+            // 🧭 设置方向
+            setDir(x, y) {
+                // 🛡️ 防自杀保护：
+                // 如果蛇正在往右走，不能突然让它往左走 (不然就头撞脖子自杀了)
+                if (this.body.length > 1) {
+                    if (x === -this.xDir && y === -this.yDir) {
+                        return; // 忽略这个错误的命令
+                    }
+                }
+                this.xDir = x;
+                this.yDir = y;
+            }
+
+            // 🏃 蛇移动的核心逻辑
+            update() {
+                // 如果方向是0 (还没开始动)，就不动
+                if (this.xDir === 0 && this.yDir === 0) return;
+
+                // 复制现在的头，作为新头的基础
+                let head = this.body[this.body.length - 1].copy();
+                
+                // 这里的逻辑是：
+                // 如果要长大，就不删尾巴，直接加个头 (身体就变长了)
+                // 如果不长大，就删掉尾巴，加个头 (身体看起来就在移动)
+                if (this.growCount > 0) {
+                    this.growCount--; // 消耗一次生长机会
+                } else {
+                    this.body.shift(); // ✂️ 删掉尾巴的第一个格子
+                }
+
+                // 新头的位置 = 老头的位置 + 方向
+                head.x += this.xDir;
+                head.y += this.yDir;
+                this.body.push(head); // 📌 把新头加上去
+            }
+
+            grow() {
+                this.growCount++; // 记录一下：我要长大！
+            }
+
+            // 🍽️ 检查有没有吃到东西
+            eat(pos) {
+                let head = this.body[this.body.length - 1];
+                // 如果头的坐标 等于 食物的坐标
+                return (head.x === pos.x && head.y === pos.y);
+            }
+
+            // 💥 检查有没有撞车
+            checkCollision(walls) {
+                let head = this.body[this.body.length - 1];
+                
+                // 1. 撞边界了吗？(出界了)
+                if (head.x >= COLS || head.x < 0 || head.y >= ROWS || head.y < 0) return true;
+
+                // 2. 撞自己了吗？(咬到身体了)
+                // 遍历身体除了头以外的每一节
+                for (let i = 0; i < this.body.length - 1; i++) {
+                    if (this.body[i].x === head.x && this.body[i].y === head.y) return true;
+                }
+
+                // 3. 撞墙了吗？(撞到障碍物)
+                for (let wall of walls) {
+                    if (head.x === wall.x && head.y === wall.y) return true;
+                }
+                return false; // 啥都没撞，平安无事
+            }
+
+            // 🎨 把蛇画出来
+            show() {
+                noStroke();
+                for (let i = 0; i < this.body.length; i++) {
+                    // i 是当前的第几节身体
+                    
+                    // 如果是最后一段 (也就是头)
+                    if (i === this.body.length - 1) {
+                        fill(76, 175, 80); // 🟢 头是亮绿色的
+                    } else {
+                        // 🌈 身体做个渐变色，看起来高级一点
+                        let c = map(i, 0, this.body.length, 100, 200);
+                        fill(50, c, 50);
+                    }
+                    
+                    // 算一下这节身体在画布上的像素位置
+                    let x = this.body[i].x * cellW;
+                    let y = this.body[i].y * cellH;
+                    
+                    // 画个方块 (稍微小一点点，留出缝隙好看)
+                    rect(x + 1, y + 1, cellW - 2, cellH - 2, 4);
+                    
+                    // 👀 如果是头，给它画两个小眼睛
+                    if (i === this.body.length - 1) {
+                        fill(0); // 黑色眼睛
+                        // 根据方向决定眼睛画在哪边 (细节!)
+                        if (this.xDir === 1) { // 向右看
+                            rect(x + cellW*0.6, y + cellH*0.2, 4, 4);
+                            rect(x + cellW*0.6, y + cellH*0.6, 4, 4);
+                        } else if (this.xDir === -1) { // 向左看
+                            rect(x + cellW*0.2, y + cellH*0.2, 4, 4);
+                            rect(x + cellW*0.2, y + cellH*0.6, 4, 4);
+                        } else if (this.yDir === -1) { // 向上看
+                            rect(x + cellW*0.2, y + cellH*0.2, 4, 4);
+                            rect(x + cellW*0.6, y + cellH*0.2, 4, 4);
+                        } else { // 向下看
+                            rect(x + cellW*0.2, y + cellH*0.6, 4, 4);
+                            rect(x + cellW*0.6, y + cellH*0.6, 4, 4);
+                        }
+                    }
+                }
+            }
+            
+            // 🔍 辅助功能：检查某个坐标是不是在蛇身上
+            contains(x, y) {
+                for (let part of this.body) {
+                    if (part.x === x && part.y === y) return true;
+                }
+                return false;
+            }
+        }
+
+        // --- 🌍 地图生成区 ---
+
+        // 🧠 聪明的生成食物：不仅要随机，还不能生成在死胡同里
+        function spawnFoodSmart() {
+            let attempts = 0; // 尝试次数
+            let valid = false; // 是否成功
+            
+            // 尝试最多100次找个好位置
+            while(attempts < 100) {
+                let rX = floor(random(COLS));
+                let rY = floor(random(ROWS));
+                
+                // 1. 必须是空地 (不是墙，也不是蛇身体)
+                if (!isWall(rX, rY) && !snake.contains(rX, rY)) {
+                    // 2. 必须是能走到的 (用A*算法快速检查一下，防止食物生在封闭的墙里)
+                    let head = snake.body[snake.body.length-1];
+                    // 这里 'true' 表示严格检查墙壁
+                    if (findPath(head, createVector(rX, rY), true)) {
+                        food = createVector(rX, rY);
+                        valid = true;
+                        break; // 找到了，退出循环
+                    }
+                }
+                attempts++;
+            }
+            
+            // 🚑 紧急预案：如果地图太挤了，实在找不到完美位置
+            // 就随便找个空地，不检查能不能走到了 (防止游戏卡死)
+            if (!valid) {
+                for(let i=0; i<50; i++) {
+                    let rX = floor(random(COLS));
+                    let rY = floor(random(ROWS));
+                    if (!isWall(rX, rY) && !snake.contains(rX, rY)) {
+                        food = createVector(rX, rY);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 🧱 随机造墙
+        function generateWalls() {
+            walls = [];
+            let head = snake.body[0];
+            for (let i = 0; i < OBSTACLE_COUNT; i++) {
+                let x = floor(random(COLS));
+                let y = floor(random(ROWS));
+                
+                // 🛡️ 保护区：别直接把墙盖在蛇头脸上，给它留点起步空间
+                if (dist(x, y, head.x, head.y) > 4) {
+                    walls.push(createVector(x, y));
+                }
+            }
+        }
+        
+        // 🔍 检查某个点是不是墙
+        function isWall(x, y) {
+            return walls.some(w => w.x === x && w.y === y);
+        }
+
+        // --- 🗺️ 寻路算法区 (这是整个AI最难也最核心的部分) ---
+        // 我们用的是 A* 算法 (A-Star)，它是游戏里最常用的找路方法
+
+        function calculatePath() {
+            let head = snake.body[snake.body.length - 1];
+            // 呼叫 findPath 函数去找路
+            let result = findPath(head, food);
+            
+            if (result) {
+                path = result; // 找到路了！存起来
+                updateStatus("发现路径", "status-ok");
+            } else {
+                path = []; // 没路了...
+                updateStatus("求生模式", "status-warn");
+                // 这里不慌，后面会有 getSafeMove 兜底
+            }
+        }
+
+        // A* 寻路核心函数
+        // startPos: 起点, endPos: 终点, strict: 是否严格模式
+        function findPath(startPos, endPos, strict = false) {
+            // 🧹 先把地图数据重置一下，清空之前的计算
+            for (let i = 0; i < COLS; i++) {
+                for (let j = 0; j < ROWS; j++) {
+                    grid[i][j].reset();
+                    // 标记哪里是墙
+                    if (isWall(i, j)) grid[i][j].wall = true;
+                }
+            }
+
+            // 🐍 把蛇的身体也当成墙 (除非蛇尾巴即将移走)
+            for (let i = 0; i < snake.body.length; i++) {
+                let part = snake.body[i];
+                
+                // 这是一个很聪明的判断：
+                // 蛇尾巴 (i===0) 下一步会移走，所以其实是可以走的！
+                // 除非：蛇正在变长(尾巴不动)，或者这是脖子(防回头)
+                let isTail = (i === 0);
+                let isNeck = (snake.body.length > 1 && i === snake.body.length - 2);
+
+                if (isTail && snake.growCount === 0 && !strict && !isNeck) {
+                    continue; // 尾巴不是墙，可以走
+                }
+
+                if (grid[part.x] && grid[part.x][part.y]) {
+                    grid[part.x][part.y].wall = true; // 把身体标记为墙
+                }
+            }
+
+            let start = grid[startPos.x][startPos.y];
+            let end = grid[endPos.x][endPos.y];
+
+            // 确保起点和终点本身不是墙 (不然没法寻路)
+            if (start) start.wall = false;
+            if (end) end.wall = false;
+
+            // openSet: 待检查的格子 (排队列表)
+            let openSet = [start];
+            // closedSet: 已经检查过的格子 (防止走回头路)
+            let closedSet = [];
+
+            // 🔄 只要还有格子没检查完
+            while (openSet.length > 0) {
+                // 1. 在待检查列表中，找出“评分”最好的格子 (离终点最近的)
+                let winner = 0;
+                for (let i = 0; i < openSet.length; i++) {
+                    if (openSet[i].f < openSet[winner].f) winner = i;
+                }
+                let current = openSet[winner];
+
+                // 🏁 如果这个格子就是终点
+                if (current === end) {
+                    // 🎉 找到路了！
+                    // 现在我们要倒着往回推，把路经记录下来
+                    let tempPath = [];
+                    let temp = current;
+                    tempPath.push(temp);
+                    while (temp.previous) {
+                        tempPath.push(temp.previous);
+                        temp = temp.previous;
+                    }
+                    return tempPath; // 返回完整的路径
+                }
+
+                // 把当前格子移出“待检查”，放入“已检查”
+                openSet.splice(winner, 1);
+                closedSet.push(current);
+
+                // 🔍 看看当前格子的邻居们 (上下左右)
+                for (let neighbor of current.neighbors) {
+                    // 如果邻居没被检查过，而且不是墙
+                    if (!closedSet.includes(neighbor) && !neighbor.wall) {
+                        let tempG = current.g + 1; // 走到邻居这里需要多花1步
+                        
+                        let newPath = false;
+                        if (openSet.includes(neighbor)) {
+                            // 如果邻居已经在排队了，看看我是不是一条更近的路？
+                            if (tempG < neighbor.g) {
+                                neighbor.g = tempG;
+                                newPath = true;
+                            }
+                        } else {
+                            // 如果邻居没排队，把它加进去
+                            neighbor.g = tempG;
+                            newPath = true;
+                            openSet.push(neighbor);
+                        }
+
+                        // 📊 如果这是一条好路，计算评分
+                        if (newPath) {
+                            // H值：估算邻居到终点的距离 (曼哈顿距离：横坐标差+纵坐标差)
+                            neighbor.h = abs(neighbor.i - end.i) + abs(neighbor.j - end.j);
+                            // F值：G(已走步数) + H(预估剩余步数) = 总评分
+                            neighbor.f = neighbor.g + neighbor.h;
+                            // 记下来：我是从 current 走到 neighbor 的
+                            neighbor.previous = current;
+                        }
+                    }
+                }
+            }
+            return null; // 🚫 找遍了所有格子都没路
+        }
+
+        // 🤖 AI 决策函数：下一步怎么走？
+        function getNextMove() {
+            let head = snake.body[snake.body.length - 1];
+
+            // 方案 A: 如果有 GPS 路径，跟着路径走
+            if (path.length > 1) {
+                // 路径是倒着存的 [终点, ..., 下一步, 起点]
+                // 所以 path.length - 2 就是我们要走的下一步
+                let nextNode = path[path.length - 2];
+                return { x: nextNode.i - head.x, y: nextNode.j - head.y };
+            }
+
+            // 方案 B: 如果没路了 (可能被自己围住了)，启动保命模式
+            // 尽量找个不死的地方走一步，哪怕离食物远一点
+            return getSafeMove(head);
+        }
+
+        // 🚑 保命移动逻辑
+        function getSafeMove(head) {
+            // 上下左右四个方向
+            let moves = [
+                {x:0, y:-1}, {x:0, y:1}, {x:-1, y:0}, {x:1, y:0}
+            ];
+
+            // 过滤出合法的移动 (不出界、不撞墙、不撞身体)
+            let validMoves = moves.filter(m => {
+                let nx = head.x + m.x;
+                let ny = head.y + m.y;
+                
+                // 检查边界
+                if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return false;
+                // 检查墙
+                if (isWall(nx, ny)) return false;
+                // 检查身体
+                for(let i = 0; i < snake.body.length; i++) {
+                    let part = snake.body[i];
+                    // 如果是尾巴且不生长，尾巴会空出来，算安全的
+                    if (i === 0 && snake.growCount === 0) continue;
+                    if (part.x === nx && part.y === ny) return false;
+                }
+                return true;
+            });
+
+            // 如果死路一条，那也没办法了
+            if (validMoves.length === 0) return null;
+
+            // 🧠 启发式逃跑：
+            // 在所有能走的方向里，选一个离蛇尾巴最远的！
+            // 为什么要离尾巴远？因为跟着尾巴走通常能绕圈圈，不容易死
+            let tail = snake.body[0];
+            validMoves.sort((a, b) => {
+                let posA = {x: head.x + a.x, y: head.y + a.y};
+                let posB = {x: head.x + b.x, y: head.y + b.y};
+                
+                // 算出距离
+                let distA = dist(posA.x, posA.y, tail.x, tail.y);
+                let distB = dist(posB.x, posB.y, tail.x, tail.y);
+                
+                // 降序排列 (大的在前)
+                return distB - distA;
+            });
+
+            return validMoves[0]; // 返回最好的那一步
+        }
+
+        // --- 🖌️ 绘图辅助函数 (纯苦力活) ---
+
+        // 画格子线
+        function drawGrid() {
+            stroke(40); // 灰色线条
+            strokeWeight(1); // 细线
+            for (let x = 0; x <= width; x += cellW) line(x, 0, x, height); // 竖线
+            for (let y = 0; y <= height; y += cellH) line(0, y, width, y); // 横线
+        }
+
+        // 画墙壁
+        function drawWalls() {
+            fill(80); // 深灰色
+            stroke(30);
+            strokeWeight(2);
+            for (let wall of walls) {
+                rect(wall.x * cellW, wall.y * cellH, cellW, cellH, 2);
+                // 画个X做装饰
+                line(wall.x*cellW, wall.y*cellH, (wall.x+1)*cellW, (wall.y+1)*cellH);
+            }
+        }
+
+        // 画食物 (一个跳动的粉色球)
+        function drawFood() {
+            fill(255, 64, 129); // 粉色
+            noStroke();
+            let cx = food.x * cellW + cellW/2; // 算圆心X
+            let cy = food.y * cellH + cellH/2; // 算圆心Y
+            let r = cellW * 0.7; // 半径
+            // 让它像心跳一样忽大忽小
+            let pulse = sin(frameCount * 0.2) * 4;
+            ellipse(cx, cy, r + pulse);
+        }
+
+        // 画 AI 的思考路径 (黄色的细线)
+        function drawPath() {
+            if (!path.length) return;
+            noFill();
+            stroke(255, 235, 59, 100); // 黄色，带点透明
+            strokeWeight(cellW * 0.15);
+            beginShape(); // 开始连线
+            let head = snake.body[snake.body.length - 1];
+            vertex(head.x * cellW + cellW/2, head.y * cellH + cellH/2);
+            // 把路径点一个个连起来
+            for (let i = path.length - 2; i >= 0; i--) {
+                vertex(path[i].i * cellW + cellW/2, path[i].j * cellH + cellH/2);
+            }
+            endShape(); // 结束连线
+        }
+
+        function gameOver() {
+            isGameOver = true;
+            updateStatus("游戏结束", "status-dead");
+        }
+
+        function updateStatus(msg, cls) {
+            if(statusEl) {
+                statusEl.innerText = msg;
+                statusEl.className = cls;
+            }
+        }
+
+        // --- 🧱 Node 类：地图上的每一个格子 ---
+        // 为了寻路算法，每个格子需要记录一些信息
+
+        class Node {
+            constructor(i, j) {
+                this.i = i; // 格子的X坐标
+                this.j = j; // 格子的Y坐标
+                this.f = 0; // 总评分
+                this.g = 0; // 走到这里花了多少步
+                this.h = 0; // 预估还要多少步
+                this.neighbors = []; // 我的邻居是谁
+                this.previous = undefined; // 我是从哪个格子走过来的
+                this.wall = false; // 我是不是墙
+            }
+            // 重置格子的数据 (为了下一次寻路)
+            reset() {
+                this.f = this.g = this.h = 0;
+                this.previous = undefined;
+                this.wall = false;
+            }
+            // 找邻居 (判断上下左右有没有出界)
+            addNeighbors(grid) {
+                let i = this.i, j = this.j;
+                if (i < COLS - 1) this.neighbors.push(grid[i + 1][j]); // 右
+                if (i > 0)        this.neighbors.push(grid[i - 1][j]); // 左
+                if (j < ROWS - 1) this.neighbors.push(grid[i][j + 1]); // 下
+                if (j > 0)        this.neighbors.push(grid[i][j - 1]); // 上
+            }
+        }
+
+    </script>
+</body>
+</html>

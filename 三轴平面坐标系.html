@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三轴平面坐标系 (统一网格)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f2f5;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            padding: 2rem;
+            text-align: center;
+            width: 90%;
+            max-width: 800px;
+        }
+        h1 { margin-top: 0; color: #1a1a1a; }
+        .description {
+            font-size: 0.9rem; color: #6c757d; margin-top: -1rem;
+            margin-bottom: 1.5rem; max-width: 500px; margin-left: auto; margin-right: auto;
+        }
+        svg { width: 100%; height: auto; overflow: visible; }
+        .axis-main { stroke: #555; stroke-width: 1.5; }
+        .axis-label { font-size: 14px; font-weight: bold; fill: #555; }
+        .grid-point {
+            fill: #a9c2d7; r: 4; cursor: pointer;
+            transition: r 0.2s, fill 0.2s;
+        }
+        .grid-point:hover { fill: #007bff; r: 6; }
+        .selected-point {
+            fill: #dc3545; r: 6; stroke: #fff; stroke-width: 2;
+            filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.3));
+        }
+        .coordinates-display {
+            margin-top: 1.5rem; font-size: 1.2rem; background-color: #e9ecef;
+            padding: 0.8rem 1.2rem; border-radius: 8px; min-height: 2.5rem;
+            display: flex; justify-content: center; align-items: center;
+            font-family: 'Courier New', Courier, monospace; font-weight: bold; color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>三轴平面坐标系</h1>
+        <p class="description">
+            一个点的位置由任意两根轴的坐标值唯一确定。
+        </p>
+        <svg id="coord-system" viewBox="-200 -180 400 300"></svg>
+        <div id="coords-display" class="coordinates-display">请点击网格上的一个点</div>
+    </div>
+
+    <script>
+        const svg = document.getElementById('coord-system');
+        const coordsDisplay = document.getElementById('coords-display');
+
+        const MAX_VAL = 10;
+        const UNIT_LEN = 12;
+
+        const VECTORS = {
+            a: { x: UNIT_LEN * Math.cos(150 * Math.PI / 180), y: UNIT_LEN * Math.sin(150 * Math.PI / 180) },
+            b: { x: UNIT_LEN * Math.cos(30 * Math.PI / 180), y: UNIT_LEN * Math.sin(30 * Math.PI / 180) },
+            c: { x: UNIT_LEN * Math.cos(270 * Math.PI / 180), y: UNIT_LEN * Math.sin(270 * Math.PI / 180) }
+        };
+
+        let selectedElement = null;
+
+        function drawBaseAxes() {
+            const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            defs.innerHTML = `
+                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#555" />
+                </marker>`;
+            svg.appendChild(defs);
+
+            ['a', 'b', 'c'].forEach(key => {
+                const axis = VECTORS[key];
+                const endX = axis.x * (MAX_VAL + 2);
+                const endY = axis.y * (MAX_VAL + 2);
+                const labelX = axis.x * (MAX_VAL + 4);
+                const labelY = axis.y * (MAX_VAL + 4);
+                
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('class', 'axis-main');
+                line.setAttribute('x1', 0); line.setAttribute('y1', 0);
+                line.setAttribute('x2', endX); line.setAttribute('y2', endY);
+                line.setAttribute('marker-end', 'url(#arrow)');
+                group.appendChild(line);
+
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('class', 'axis-label');
+                text.setAttribute('x', labelX); text.setAttribute('y', labelY);
+                text.textContent = key;
+                group.appendChild(text);
+            });
+            svg.appendChild(group);
+        }
+
+        function drawUnifiedGrid() {
+            const gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            const pointsData = new Map();
+            const pairs = [['a', 'b'], ['a', 'c'], ['b', 'c']];
+
+            pairs.forEach(pair => {
+                const [key1, key2] = pair;
+                const v1 = VECTORS[key1];
+                const v2 = VECTORS[key2];
+
+                for (let i = 0; i <= MAX_VAL; i++) {
+                    for (let j = 0; j <= MAX_VAL; j++) {
+                        const x = i * v1.x + j * v2.x;
+                        const y = i * v1.y + j * v2.y;
+                        
+                        const pointKey = `${x.toFixed(2)},${y.toFixed(2)}`;
+                        
+                        // 只在Map中不存在该点时才添加，保留第一次生成的坐标定义
+                        if (!pointsData.has(pointKey)) {
+                            pointsData.set(pointKey, {
+                                coords: { [key1]: i, [key2]: j },
+                                x: x,
+                                y: y
+                            });
+                        }
+                    }
+                }
+            });
+
+            pointsData.forEach(data => {
+                const point = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                point.setAttribute('class', 'grid-point');
+                point.setAttribute('cx', data.x);
+                point.setAttribute('cy', data.y);
+                
+                point.addEventListener('click', () => handlePointClick(data.coords, point));
+                gridGroup.appendChild(point);
+            });
+
+            svg.prepend(gridGroup);
+        }
+
+        // **核心逻辑修正函数**
+        function handlePointClick(coords, element) {
+            if (selectedElement) {
+                selectedElement.setAttribute('class', 'grid-point');
+            }
+            element.setAttribute('class', 'selected-point');
+            selectedElement = element;
+            
+            const [key1, key2] = Object.keys(coords);
+            const val1 = coords[key1];
+            const val2 = coords[key2];
+
+            let displayText = '';
+            
+            // 规则1: 原点 (0,0)
+            if (val1 === 0 && val2 === 0) {
+                displayText = `坐标: (<b>0</b>)`;
+            } 
+            // 规则2: 点在第一根轴上
+            else if (val1 > 0 && val2 === 0) {
+                displayText = `坐标: (${key1}:<b>${val1}</b>)`;
+            }
+            // 规则3: 点在第二根轴上
+            else if (val1 === 0 && val2 > 0) {
+                displayText = `坐标: (${key2}:<b>${val2}</b>)`;
+            }
+            // 规则4: 点由两根轴共同定义
+            else {
+                displayText = `坐标: (${key1}:<b>${val1}</b>, ${key2}:<b>${val2}</b>)`;
+            }
+            
+            coordsDisplay.innerHTML = displayText;
+        }
+
+        // Initial setup
+        drawBaseAxes();
+        drawUnifiedGrid();
+
+    </script>
+</body>
+</html>

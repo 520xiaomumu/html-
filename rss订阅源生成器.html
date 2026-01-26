@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RSS 订阅源生成器</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 平滑过渡效果 */
+        .transition-all-300 {
+            transition: all 0.3s ease-in-out;
+        }
+        /* 隐藏滚动条但保留功能 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-50 font-sans text-slate-800">
+
+    <div class="flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-3xl w-full space-y-8">
+
+            <!-- 标题与配置区域 -->
+            <div class="text-center">
+                <div class="flex justify-center mb-4">
+                    <div id="header-icon-container" class="bg-orange-500 p-3 rounded-full shadow-lg transition-colors duration-300">
+                        <i data-lucide="rss" class="w-10 h-10 text-white" id="header-icon"></i>
+                    </div>
+                </div>
+                <h2 class="mt-2 text-3xl font-extrabold text-gray-900 tracking-tight">
+                    RSS 订阅源生成器
+                </h2>
+                
+                <!-- 新增：可编辑的 Base URL -->
+                <div class="mt-4 flex justify-center items-center space-x-2">
+                    <label for="base-url" class="text-sm text-gray-500">RSSHub 节点:</label>
+                    <input type="text" id="base-url" value="https://eren.zeabur.app" 
+                        class="text-sm font-mono bg-white border border-gray-300 rounded px-2 py-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-orange-500 w-64 text-center transition-all"
+                        placeholder="输入 RSSHub 域名">
+                </div>
+            </div>
+
+            <!-- 平台切换 Tabs -->
+            <div id="platform-tabs" class="bg-white rounded-t-lg shadow-sm border-b border-gray-200 flex overflow-x-auto no-scrollbar sm:flex-wrap">
+                <!-- Tabs will be injected here by JS -->
+            </div>
+
+            <!-- 主卡片 -->
+            <div class="bg-white py-8 px-4 shadow sm:rounded-b-lg sm:px-10 border border-t-0 border-gray-100 rounded-b-lg mt-0">
+                
+                <!-- 第一步：输入 ID -->
+                <div class="mb-8">
+                    <label id="step1-label" class="block text-sm font-medium text-gray-700 mb-2">
+                        第一步：输入 Bilibili 链接或 ID
+                    </label>
+                    <div class="relative rounded-md shadow-sm">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i data-lucide="link" class="h-5 w-5 text-gray-400" id="input-icon"></i>
+                        </div>
+                        <input
+                            type="text"
+                            id="uid-input"
+                            class="block w-full pl-10 pr-12 sm:text-lg border-gray-300 rounded-md py-3 border transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            placeholder="例如: 401742377 或 space.bilibili.com/..."
+                        />
+                        <div id="uid-badge" class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none hidden">
+                            <span class="font-bold text-sm px-2 py-0.5 rounded bg-orange-100 text-orange-500">
+                                ID 已提取
+                            </span>
+                        </div>
+                    </div>
+                    <p class="mt-2 text-xs text-gray-400">
+                        * 支持直接粘贴分享链接或主页 URL，系统会自动提取 ID。
+                    </p>
+                </div>
+
+                <!-- 第二步：选择类型 -->
+                <div class="mb-8">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">
+                        第二步：选择订阅类型
+                    </label>
+                    <div id="options-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <!-- Options will be injected here by JS -->
+                    </div>
+                </div>
+
+                <!-- 第三步：结果输出 -->
+                <div id="result-section" class="transition-all duration-300 opacity-50 grayscale pointer-events-none">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        生成结果 (直接复制)
+                    </label>
+                    <div class="mt-1 flex rounded-md shadow-sm">
+                        <div class="relative flex-grow focus-within:z-10">
+                            <input
+                                type="text"
+                                id="result-input"
+                                readonly
+                                class="block w-full rounded-none rounded-l-md sm:text-sm border-gray-300 border bg-gray-50 py-3 pl-4 text-gray-600 font-mono focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
+                                value="请输入链接以生成..."
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            id="copy-btn"
+                            class="relative -ml-px inline-flex items-center space-x-2 px-6 py-3 border border-gray-300 text-sm font-medium rounded-r-md focus:outline-none focus:ring-1 bg-orange-500 hover:bg-orange-600 text-white border-orange-200 transition-colors"
+                        >
+                            <i data-lucide="copy" class="h-5 w-5 btn-icon"></i>
+                            <span class="btn-text">复制</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="preview-link-container" class="mt-4 flex justify-center hidden">
+                    <a 
+                        href="#" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        class="text-xs text-gray-400 hover:text-orange-600 flex items-center gap-1 transition-colors"
+                        id="preview-link"
+                    >
+                        <i data-lucide="external-link" class="w-3 h-3"></i>
+                        在浏览器中测试打开 (RSSHub)
+                    </a>
+                </div>
+
+            </div>
+
+            <div class="text-center text-xs text-gray-400 pb-8">
+                简单工具，从不麻烦。
+            </div>
+
+        </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // --- Configuration ---
+        const platforms = {
+            bilibili: {
+                id: 'bilibili',
+                name: 'Bilibili',
+                icon: 'tv',
+                placeholder: '例如: 401742377 或 space.bilibili.com/...',
+                colors: { main: 'orange-500', hover: 'orange-600', text: 'orange-600', bgLight: 'orange-50', borderLight: 'orange-200', ring: 'orange-500', badgeBg: 'bg-orange-100', badgeText: 'text-orange-500', darkText: 'orange-900', btnText: 'text-white' },
+                options: [
+                    { id: 'video', label: '用户投稿', path: '/bilibili/user/video/', desc: 'UP 主发布的视频', icon: 'tv' },
+                    { id: 'dynamic', label: '用户动态', path: '/bilibili/user/dynamic/', desc: '转发与图文动态', icon: 'user' },
+                    { id: 'fav', label: '收藏夹', path: '/bilibili/user/fav/', desc: '默认收藏夹内容', icon: 'star' },
+                    { id: 'coin', label: '投币视频', path: '/bilibili/user/coin/', desc: '最近投币的视频', icon: 'users' },
+                ]
+            },
+            youtube: {
+                id: 'youtube',
+                name: 'YouTube',
+                icon: 'youtube',
+                placeholder: '例如: @LofiGirl 或 youtube.com/@...',
+                colors: { main: 'red-600', hover: 'red-700', text: 'red-600', bgLight: 'red-50', borderLight: 'red-200', ring: 'red-500', badgeBg: 'bg-red-100', badgeText: 'text-red-600', darkText: 'red-900', btnText: 'text-white' },
+                options: [
+                    { id: 'video', label: '频道视频', desc: '频道最新发布的视频', icon: 'video' },
+                    { id: 'community', label: '社区动态', desc: '社区帖子 (Community Tab)', icon: 'message-square' }
+                ]
+            },
+            xiaoyuzhou: {
+                id: 'xiaoyuzhou',
+                name: '小宇宙',
+                icon: 'mic',
+                placeholder: '例如: xiaoyuzhoufm.com/podcast/...',
+                colors: { main: 'indigo-500', hover: 'indigo-600', text: 'indigo-600', bgLight: 'indigo-50', borderLight: 'indigo-200', ring: 'indigo-500', badgeBg: 'bg-indigo-100', badgeText: 'text-indigo-700', darkText: 'indigo-900', btnText: 'text-white' },
+                options: [
+                    { id: 'podcast', label: '播客更新', path: '/xiaoyuzhou/podcast/', desc: '订阅该播客的最新单集', icon: 'mic' }
+                ]
+            },
+            jike: {
+                id: 'jike',
+                name: '即刻',
+                icon: 'activity',
+                placeholder: '例如: okjike.com/users/... 或 /topics/...',
+                colors: { main: 'yellow-400', hover: 'yellow-500', text: 'yellow-600', bgLight: 'yellow-50', borderLight: 'yellow-200', ring: 'yellow-400', badgeBg: 'bg-yellow-100', badgeText: 'text-yellow-800', darkText: 'yellow-800', btnText: 'text-yellow-900' },
+                options: [
+                    { id: 'user', label: '用户动态', path: '/jike/user/', desc: '指定用户的即刻动态', icon: 'user' },
+                    { id: 'topic', label: '圈子/话题', path: '/jike/topic/', desc: '指定圈子的精选/全部动态', icon: 'hash' }
+                ]
+            }
+        };
+
+        // --- State ---
+        let state = {
+            platform: 'bilibili',
+            uid: '',
+            selectedType: 'video',
+            baseUrl: 'https://eren.zeabur.app',
+            copied: false
+        };
+
+        // --- DOM Elements ---
+        const els = {
+            baseUrlInput: document.getElementById('base-url'),
+            platformTabs: document.getElementById('platform-tabs'),
+            uidInput: document.getElementById('uid-input'),
+            uidBadge: document.getElementById('uid-badge'),
+            step1Label: document.getElementById('step1-label'),
+            optionsGrid: document.getElementById('options-grid'),
+            resultSection: document.getElementById('result-section'),
+            resultInput: document.getElementById('result-input'),
+            copyBtn: document.getElementById('copy-btn'),
+            previewLinkContainer: document.getElementById('preview-link-container'),
+            previewLink: document.getElementById('preview-link'),
+            headerIconContainer: document.getElementById('header-icon-container'),
+            headerIcon: document.getElementById('header-icon'),
+            inputIcon: document.getElementById('input-icon')
+        };
+
+        // --- Initialization ---
+        function init() {
+            renderTabs();
+            updatePlatformUI();
+            setupEventListeners();
+            lucide.createIcons();
+        }
+
+        // --- Event Listeners ---
+        function setupEventListeners() {
+            // Base URL Change
+            els.baseUrlInput.addEventListener('input', (e) => {
+                state.baseUrl = e.target.value.trim() || 'https://eren.zeabur.app';
+                updateResult();
+            });
+
+            // UID Input
+            els.uidInput.addEventListener('input', (e) => {
+                handleInputChange(e.target.value);
+            });
+
+            // Copy Button
+            els.copyBtn.addEventListener('click', handleCopy);
+        }
+
+        // --- Logic: Switch Platform ---
+        function setPlatform(platformKey) {
+            state.platform = platformKey;
+            state.uid = '';
+            state.selectedType = platforms[platformKey].options[0].id;
+            
+            // Clear inputs
+            els.uidInput.value = '';
+            
+            renderTabs();
+            updatePlatformUI();
+            handleInputChange(''); // reset UI state
+        }
+
+        // --- Logic: Render Tabs ---
+        function renderTabs() {
+            els.platformTabs.innerHTML = Object.keys(platforms).map(key => {
+                const p = platforms[key];
+                const isActive = state.platform === key;
+                
+                let activeClass = '';
+                if (isActive) {
+                    if (key === 'bilibili') activeClass = 'text-orange-500 border-orange-500';
+                    else if (key === 'youtube') activeClass = 'text-red-600 border-red-600';
+                    else if (key === 'xiaoyuzhou') activeClass = 'text-indigo-600 border-indigo-600';
+                    else if (key === 'jike') activeClass = 'text-yellow-600 border-yellow-400';
+                }
+
+                const baseClass = "flex-1 min-w-[80px] py-4 text-sm font-medium flex items-center justify-center space-x-2 transition-colors duration-200 focus:outline-none cursor-pointer select-none";
+                const inactiveClass = "bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 border-b border-transparent";
+                const activeStyle = `bg-white border-b-2 ${activeClass}`;
+
+                return `
+                    <div onclick="setPlatform('${key}')" class="${baseClass} ${isActive ? activeStyle : inactiveClass}">
+                        <i data-lucide="${p.icon}" class="w-5 h-5"></i>
+                        <span class="hidden sm:inline">${p.name}</span>
+                    </div>
+                `;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        // --- Logic: Update Platform UI (Colors, Options, Placeholders) ---
+        function updatePlatformUI() {
+            const p = platforms[state.platform];
+            const c = p.colors;
+
+            // Update Header Icon Color
+            els.headerIconContainer.className = `p-3 rounded-full shadow-lg transition-colors duration-300 bg-${c.main.split('-')[0]}-${c.main.split('-')[1]}`;
+            if (state.platform === 'jike') {
+                els.headerIconContainer.classList.replace('bg-orange-500', 'bg-yellow-400'); // Initial default override
+                els.headerIcon.classList.remove('text-white');
+                els.headerIcon.classList.add('text-yellow-900');
+            } else {
+                els.headerIcon.classList.add('text-white');
+                els.headerIcon.classList.remove('text-yellow-900');
+            }
+
+            // Update Input
+            els.step1Label.textContent = `第一步：输入 ${p.name} 链接或 ID`;
+            els.uidInput.placeholder = p.placeholder;
+            
+            // Focus ring colors logic for Input
+            els.uidInput.className = els.uidInput.className.replace(/focus:ring-\w+-\d+ focus:border-\w+-\d+/, `focus:ring-${c.ring} focus:border-${c.ring}`);
+            
+            // Update Base URL Focus
+            els.baseUrlInput.className = els.baseUrlInput.className.replace(/focus:ring-\w+-\d+/, `focus:ring-${c.ring}`);
+
+            // Render Options
+            renderOptions();
+        }
+
+        // --- Logic: Render Options Grid ---
+        function renderOptions() {
+            const p = platforms[state.platform];
+            const c = p.colors;
+
+            els.optionsGrid.innerHTML = p.options.map(opt => {
+                const isSelected = state.selectedType === opt.id;
+                
+                let containerClass = `cursor-pointer relative rounded-lg border p-4 shadow-sm flex items-start space-x-3 transition-all `;
+                if (isSelected) {
+                    containerClass += `ring-2 border-transparent ring-${c.ring} bg-${c.bgLight}`;
+                } else {
+                    containerClass += `border-gray-200 bg-white hover:border-gray-300`;
+                }
+
+                const iconClass = isSelected ? `text-${c.text}` : 'text-gray-400';
+                const labelClass = isSelected ? `text-${c.darkText}` : 'text-gray-900';
+                const descClass = isSelected ? `text-${c.text}` : 'text-gray-500';
+
+                return `
+                    <div onclick="selectOption('${opt.id}')" class="${containerClass}">
+                        <div class="flex-shrink-0 mt-1 ${iconClass}">
+                            <i data-lucide="${opt.icon}" class="w-5 h-5"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <span class="absolute inset-0" aria-hidden="true"></span>
+                            <p class="text-sm font-medium ${labelClass}">
+                                ${opt.label}
+                            </p>
+                            <p class="text-xs truncate ${descClass}">
+                                ${opt.desc}
+                            </p>
+                        </div>
+                        ${isSelected ? `<i data-lucide="check" class="w-5 h-5 text-${c.text}"></i>` : ''}
+                    </div>
+                `;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        // --- Logic: Select Option ---
+        function selectOption(typeId) {
+            state.selectedType = typeId;
+            renderOptions();
+            updateResult();
+        }
+
+        // --- Logic: Input Parsing (Core) ---
+        function handleInputChange(value) {
+            const p = state.platform;
+            let uid = '';
+
+            if (!value.trim()) {
+                updateUidState('', false);
+                return;
+            }
+
+            if (p === 'bilibili') {
+                if (/^\d+$/.test(value)) {
+                    uid = value;
+                } else {
+                    const uidMatch = value.match(/(?:space\.bilibili\.com|bilibili\.com\/space)\/(\d+)/);
+                    if (uidMatch) {
+                        uid = uidMatch[1];
+                        if (value.includes('/dynamic')) selectOption('dynamic');
+                        else if (value.includes('/fav')) selectOption('fav');
+                        else if (value.includes('/coin')) selectOption('coin');
+                        else selectOption('video');
+                    }
+                }
+            } else if (p === 'youtube') {
+                const handleMatch = value.match(/@([\w.-]+)/);
+                const channelIdMatch = value.match(/(?:channel\/|UC)([\w-]{22})/);
+                
+                if (channelIdMatch) {
+                    const rawId = value.match(/channel\/(UC[\w-]{22})/) || value.match(/^(UC[\w-]{22})$/);
+                    uid = rawId ? rawId[1] : (handleMatch ? `@${handleMatch[1]}` : '');
+                } else if (handleMatch) {
+                    uid = `@${handleMatch[1]}`;
+                } else {
+                    if (value.startsWith('UC') && value.length === 24) uid = value;
+                    else if (value.length > 0 && !value.includes('/') && !value.includes('.')) uid = value.startsWith('@') ? value : `@${value}`;
+                }
+            } else if (p === 'xiaoyuzhou') {
+                const podcastMatch = value.match(/podcast\/([a-fA-F0-9]{24})/);
+                const isPureId = /^[a-fA-F0-9]{24}$/.test(value);
+                if (podcastMatch) uid = podcastMatch[1];
+                else if (isPureId) uid = value;
+            } else if (p === 'jike') {
+                const userMatch = value.match(/(?:users|u)\/([a-zA-Z0-9-]+)/);
+                const topicMatch = value.match(/topics\/([a-zA-Z0-9]+)/);
+                
+                if (userMatch) {
+                    uid = userMatch[1];
+                    selectOption('user');
+                } else if (topicMatch) {
+                    uid = topicMatch[1];
+                    selectOption('topic');
+                } else {
+                     if (value.includes('-') && value.length > 20) {
+                        uid = value;
+                        selectOption('user');
+                    } else if (value.length > 10 && !value.includes('/')) {
+                        uid = value;
+                    }
+                }
+            }
+
+            updateUidState(uid, !!uid);
+        }
+
+        // --- Logic: Update UI based on UID presence ---
+        function updateUidState(uid, isValid) {
+            state.uid = uid;
+            const c = platforms[state.platform].colors;
+
+            // Toggle Icon: Link vs Check
+            if (isValid) {
+                els.inputIcon.setAttribute('data-lucide', 'check');
+                els.inputIcon.classList.remove('text-gray-400');
+                els.inputIcon.classList.add('text-green-500');
+                
+                // Show Badge
+                els.uidBadge.classList.remove('hidden');
+                els.uidBadge.innerHTML = `<span class="font-bold text-sm px-2 py-0.5 rounded ${c.badgeBg} ${c.badgeText}">ID 已提取</span>`;
+                
+                // Input BG
+                els.uidInput.classList.add(c.bgLight);
+                
+                // Result Section Active
+                els.resultSection.classList.remove('opacity-50', 'grayscale', 'pointer-events-none');
+                els.resultSection.classList.add('opacity-100');
+                
+            } else {
+                els.inputIcon.setAttribute('data-lucide', 'link');
+                els.inputIcon.classList.add('text-gray-400');
+                els.inputIcon.classList.remove('text-green-500');
+                
+                // Hide Badge
+                els.uidBadge.classList.add('hidden');
+                
+                // Reset Input BG
+                els.uidInput.className = els.uidInput.className.replace(/bg-\w+-50/, '');
+                
+                // Result Section Disabled
+                els.resultSection.classList.add('opacity-50', 'grayscale', 'pointer-events-none');
+                els.resultSection.classList.remove('opacity-100');
+            }
+            
+            lucide.createIcons();
+            updateResult();
+        }
+
+        // --- Logic: Generate Final URL ---
+        function updateResult() {
+            const { platform, uid, selectedType, baseUrl } = state;
+            const p = platforms[platform];
+            
+            if (!uid) {
+                els.resultInput.value = '请输入链接以生成...';
+                els.previewLinkContainer.classList.add('hidden');
+                
+                // Reset Button State (Replacing the undefined function)
+                state.copied = false;
+                const c = p.colors;
+                const btnClass = `relative -ml-px inline-flex items-center space-x-2 px-6 py-3 border text-sm font-medium rounded-r-md focus:outline-none focus:ring-1 transition-colors bg-${c.main} hover:bg-${c.hover} border-${c.borderLight} ${c.btnText}`;
+                els.copyBtn.className = btnClass;
+                els.copyBtn.innerHTML = `<i data-lucide="copy" class="h-5 w-5 btn-icon"></i><span class="btn-text">复制</span>`;
+                lucide.createIcons();
+                
+                return;
+            }
+
+            let path = '';
+            
+            if (platform === 'youtube') {
+                const isChannelId = uid.startsWith('UC');
+                if (selectedType === 'community') path = `/youtube/community/${uid}`;
+                else path = isChannelId ? `/youtube/channel/${uid}` : `/youtube/user/${uid}`;
+            } else {
+                const selectedOption = p.options.find(opt => opt.id === selectedType);
+                if (selectedOption && selectedOption.path) {
+                    path = `${selectedOption.path}${uid}`;
+                }
+            }
+            
+            // Remove trailing slash from base url if present
+            const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+            const finalUrl = `${cleanBaseUrl}${path}`;
+            
+            els.resultInput.value = finalUrl;
+            
+            // Update Preview Link
+            els.previewLink.href = finalUrl;
+            els.previewLink.className = `text-xs text-gray-400 flex items-center gap-1 transition-colors hover:text-${p.colors.text}`;
+            els.previewLinkContainer.classList.remove('hidden');
+            
+            // Update Copy Button Color
+            if (!state.copied) {
+                const c = p.colors;
+                const btnClass = `relative -ml-px inline-flex items-center space-x-2 px-6 py-3 border text-sm font-medium rounded-r-md focus:outline-none focus:ring-1 transition-colors bg-${c.main} hover:bg-${c.hover} border-${c.borderLight} ${c.btnText}`;
+                els.copyBtn.className = btnClass;
+            }
+        }
+
+        // --- Logic: Copy ---
+        function handleCopy() {
+            const url = els.resultInput.value;
+            if (!url || !state.uid) return;
+
+            // 使用 document.execCommand('copy') 以兼容 iframe 环境
+            els.resultInput.select();
+            els.resultInput.setSelectionRange(0, 99999); // 兼容移动端
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    state.copied = true;
+                    
+                    // Change Button to Green
+                    els.copyBtn.className = `relative -ml-px inline-flex items-center space-x-2 px-6 py-3 border border-green-600 text-sm font-medium rounded-r-md focus:outline-none focus:ring-1 transition-colors bg-green-600 hover:bg-green-700 text-white`;
+                    els.copyBtn.innerHTML = `<i data-lucide="check" class="h-5 w-5"></i><span>已复制</span>`;
+                    lucide.createIcons();
+
+                    setTimeout(() => {
+                        state.copied = false;
+                        els.copyBtn.innerHTML = `<i data-lucide="copy" class="h-5 w-5"></i><span>复制</span>`;
+                        updateResult(); // Restore original color
+                        lucide.createIcons();
+                    }, 2000);
+                } else {
+                     console.error('Copy command failed');
+                }
+            } catch (err) {
+                console.error('Copy failed', err);
+            }
+            
+            // Remove selection to be clean
+             if (window.getSelection) {
+                window.getSelection().removeAllRanges();
+            }
+            els.resultInput.blur();
+        }
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>

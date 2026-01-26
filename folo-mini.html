@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Folo Mini - 本地版</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        zinc: {
+                            850: '#1f1f22',
+                            950: '#09090b', 
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Google Fonts & Styles -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+        
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.3); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.5); }
+        
+        /* Typography adjustments */
+        .prose h1 { font-size: 1.5em; font-weight: 700; margin: 1em 0 0.5em; line-height: 1.3; }
+        .prose h2 { font-size: 1.25em; font-weight: 600; margin: 1em 0 0.5em; line-height: 1.3; }
+        .prose h3 { font-size: 1.1em; font-weight: 600; margin: 1em 0 0.5em; }
+        .prose p { margin-bottom: 1em; line-height: 1.7; font-size: 1.05rem; }
+        .prose ul { list-style-type: disc; padding-left: 1.25em; margin-bottom: 1em; }
+        .prose ol { list-style-type: decimal; padding-left: 1.25em; margin-bottom: 1em; }
+        .prose img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 1em 0; display: block; }
+        .prose blockquote { border-left: 4px solid #e5e7eb; padding-left: 1em; color: #6b7280; font-style: italic; margin: 1em 0; }
+        .prose pre { background: #f3f4f6; padding: 1em; border-radius: 0.5rem; overflow-x: auto; font-size: 0.9em; }
+        .dark .prose pre { background: #27272a; }
+        .dark .prose blockquote { border-color: #3f3f46; color: #a1a1aa; }
+        
+        .animate-fade-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+
+        .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+        .toast { pointer-events: auto; padding: 10px 16px; border-radius: 8px; color: white; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: fadeIn 0.3s ease; max-width: 300px; }
+        .toast.error { background-color: #ef4444; }
+        .toast.success { background-color: #22c55e; }
+    </style>
+    
+    <!-- DATA SEED BLOCK: This is where data lives in the downloaded file -->
+    <script id="app-data" type="application/json">null</script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- Constants & Config ---
+        const INITIAL_FEEDS = [
+            { id: '1', title: '少数派', url: 'https://sspai.com/feed' },
+            { id: '2', title: '36氪', url: 'https://36kr.com/feed' },
+            { id: '3', title: 'V2EX', url: 'https://www.v2ex.com/index.xml' },
+        ];
+
+        // --- Generator Config ---
+        const GEN_PLATFORMS = {
+            bilibili: {
+                id: 'bilibili', name: 'Bilibili', icon: 'Tv', placeholder: '例如: 401742377 或 space.bilibili.com/...',
+                colors: { main: 'orange-500', text: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-200' },
+                requiresAuth: true,
+                options: [
+                    { id: 'video', label: '用户投稿', path: '/bilibili/user/video/', desc: 'UP 主发布的视频', icon: 'Tv' },
+                    { id: 'dynamic', label: '用户动态', path: '/bilibili/user/dynamic/', desc: '转发与图文动态', icon: 'User' },
+                    { id: 'fav', label: '收藏夹', path: '/bilibili/user/fav/', desc: '默认收藏夹内容', icon: 'Star' },
+                    { id: 'coin', label: '投币视频', path: '/bilibili/user/coin/', desc: '最近投币的视频', icon: 'Coins' },
+                ]
+            },
+            youtube: {
+                id: 'youtube', name: 'YouTube', icon: 'Youtube', placeholder: '例如: @LofiGirl 或 youtube.com/@...',
+                colors: { main: 'red-600', text: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
+                requiresAuth: true,
+                options: [
+                    { id: 'video', label: '频道视频', desc: '频道最新发布的视频', icon: 'Video' },
+                    { id: 'community', label: '社区动态', desc: '社区帖子 (Community Tab)', icon: 'MessageSquare' }
+                ]
+            },
+            weibo: {
+                id: 'weibo', name: '微博', icon: 'Eye', placeholder: '例如: weibo.com/u/123456',
+                colors: { main: 'rose-500', text: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-200' },
+                requiresAuth: true,
+                options: [
+                    { id: 'timeline', label: '博主动态', path: '/weibo/user/', desc: '用户的全部微博动态', icon: 'ScrollText' },
+                    { id: 'keyword', label: '关键词搜索', path: '/weibo/keyword/', desc: '实时热搜关键词', icon: 'Search' }
+                ]
+            },
+            xiaoyuzhou: {
+                id: 'xiaoyuzhou', name: '小宇宙', icon: 'Mic', placeholder: '例如: xiaoyuzhoufm.com/podcast/...',
+                colors: { main: 'indigo-500', text: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-200' },
+                requiresAuth: false,
+                options: [
+                    { id: 'podcast', label: '播客更新', path: '/xiaoyuzhou/podcast/', desc: '订阅该播客的最新单集', icon: 'Mic' }
+                ]
+            },
+            jike: {
+                id: 'jike', name: '即刻', icon: 'Activity', placeholder: '例如: okjike.com/users/...',
+                colors: { main: 'yellow-400', text: 'text-yellow-600', bg: 'bg-yellow-50', border: 'border-yellow-200' },
+                requiresAuth: false,
+                options: [
+                    { id: 'user', label: '用户动态', path: '/jike/user/', desc: '指定用户的即刻动态', icon: 'User' },
+                    { id: 'topic', label: '圈子/话题', path: '/jike/topic/', desc: '指定圈子的精选/全部动态', icon: 'Hash' }
+                ]
+            }
+        };
+
+        const DEFAULT_NODES = [
+            'https://eren.zeabur.app',
+            'https://rsshub.app',
+            'https://rsshub.feedlib.xyz'
+        ];
+
+        // --- Icons ---
+        const Icon = ({ path, className, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{path}</svg>
+        );
+        const Icons = {
+            Plus: (p) => <Icon path={<><path d="M5 12h14"/><path d="M12 5v14"/></>} {...p} />,
+            Trash: (p) => <Icon path={<><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>} {...p} />,
+            Menu: (p) => <Icon path={<><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></>} {...p} />,
+            X: (p) => <Icon path={<><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>} {...p} />,
+            Rss: (p) => <Icon path={<><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></>} {...p} />,
+            Sparkles: (p) => <Icon path={<path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>} {...p} />,
+            ExternalLink: (p) => <Icon path={<><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></>} {...p} />,
+            Left: (p) => <Icon path={<path d="m15 18-6-6 6-6"/>} {...p} />,
+            Settings: (p) => <Icon path={<><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></>} {...p} />,
+            Moon: (p) => <Icon path={<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>} {...p} />,
+            Sun: (p) => <Icon path={<><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></>} {...p} />,
+            Loader: (p) => <Icon path={<path d="M21 12a9 9 0 1 1-6.219-8.56"/>} className={cn("animate-spin", p.className)} {...p} />,
+            Refresh: (p) => <Icon path={<><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></>} {...p} />,
+            Save: (p) => <Icon path={<><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></>} {...p} />,
+            Layers: (p) => <Icon path={<><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>} {...p} />,
+            Star: (p) => <Icon path={<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>} {...p} />,
+            Download: (p) => <Icon path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></>} {...p} />,
+            Link: (p) => <Icon path={<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>} {...p} />,
+            Activity: (p) => <Icon path={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>} {...p} />,
+            Compass: (p) => <Icon path={<><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></>} {...p} />,
+            Cpu: (p) => <Icon path={<><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></>} {...p} />,
+            Code: (p) => <Icon path={<><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></>} {...p} />,
+            PenTool: (p) => <Icon path={<><path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/></>} {...p} />,
+            Coffee: (p) => <Icon path={<><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 0 1 4 4v1a4 4 0 0 1-4 4h-1"/><line x1="6" x2="6" y1="2" y2="4"/></>} {...p} />,
+            BookOpen: (p) => <Icon path={<><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></>} {...p} />,
+            Headphones: (p) => <Icon path={<><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></>} {...p} />,
+            Video: (p) => <Icon path={<><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></>} {...p} />,
+            Play: (p) => <Icon path={<polygon points="5 3 19 12 5 21 5 3" />} {...p} />,
+            ChevronDown: (p) => <Icon path={<path d="m6 9 6 6 6-6"/>} {...p} />,
+            AlertTriangle: (p) => <Icon path={<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></>} {...p} />,
+            Copy: (p) => <Icon path={<><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></>} {...p} />,
+            Check: (p) => <Icon path={<polyline points="20 6 9 17 4 12"/>} {...p} />,
+            Search: (p) => <Icon path={<><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>} {...p} />,
+            Hash: (p) => <Icon path={<><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></>} {...p} />,
+            ScrollText: (p) => <Icon path={<><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></>} {...p} />,
+            MessageSquare: (p) => <Icon path={<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>} {...p} />,
+            Coins: (p) => <Icon path={<><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></>} {...p} />,
+            Tv: (p) => <Icon path={<><rect width="20" height="15" x="2" y="7" rx="2" ry="2" /><polyline points="17 2 12 7 7 2" /></>} {...p} />,
+            User: (p) => <Icon path={<><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>} {...p} />,
+            Youtube: (p) => <Icon path={<><path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/></>} {...p} />,
+            Eye: (p) => <Icon path={<><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></>} {...p} />,
+            Mic: (p) => <Icon path={<><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></>} {...p} />,
+        };
+
+        // --- Helpers ---
+        const cn = (...classes) => classes.filter(Boolean).join(' ');
+        
+        // --- RSS Parsers ---
+        const parseXMLRSS = (xmlText) => {
+             const parser = new DOMParser();
+             const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+             const isAtom = xmlDoc.querySelector("feed");
+             
+             const feedTitle = xmlDoc.querySelector(isAtom ? "feed > title" : "channel > title")?.textContent || "";
+             const items = Array.from(xmlDoc.querySelectorAll(isAtom ? "entry" : "item"));
+
+             return items.map(item => {
+                 const title = item.querySelector("title")?.textContent || "";
+                 let link = "";
+                 if (isAtom) {
+                     link = item.querySelector("link[rel='alternate']")?.getAttribute("href") || item.querySelector("link")?.getAttribute("href");
+                 } else {
+                     link = item.querySelector("link")?.textContent;
+                 }
+                 const pubDate = item.querySelector("pubDate, published, updated")?.textContent || new Date().toISOString();
+                 let description = "";
+                 const contentEncoded = item.getElementsByTagNameNS("http://purl.org/rss/1.0/modules/content/", "encoded")[0];
+                 if (contentEncoded) {
+                     description = contentEncoded.textContent;
+                 } else {
+                     description = item.querySelector("encoded")?.textContent || item.querySelector("description, summary, content")?.textContent || "";
+                 }
+                 const guid = item.querySelector("guid, id")?.textContent || link;
+
+                 // --- Media/Enclosure Parsing ---
+                 let media = null;
+                 if (isAtom) {
+                     const enc = item.querySelector("link[rel='enclosure']");
+                     if (enc) media = { url: enc.getAttribute("href"), type: enc.getAttribute("type") };
+                 } else {
+                     const enc = item.querySelector("enclosure");
+                     if (enc) media = { url: enc.getAttribute("url"), type: enc.getAttribute("type") };
+                     
+                     // Fallback for media:content (optional but good for some feeds)
+                     if (!media) {
+                         const mediaContent = item.getElementsByTagNameNS("*", "content"); // Broad namespace check
+                         for(let i=0; i<mediaContent.length; i++) {
+                             const url = mediaContent[i].getAttribute("url");
+                             const type = mediaContent[i].getAttribute("type") || "";
+                             if (url && (type.startsWith("video") || type.startsWith("audio"))) {
+                                 media = { url, type };
+                                 break;
+                             }
+                         }
+                     }
+                 }
+
+                 return { title, link, feedTitle, id: guid, isoDate: pubDate, description, content: description, media };
+             });
+        }
+
+        const fetchRSS = async (url) => {
+            // Strategy 1: RSS2JSON
+            try {
+                const res = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`);
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    return data.items.map(item => ({
+                        ...item,
+                        feedTitle: data.feed.title,
+                        id: item.guid || item.link,
+                        isoDate: item.pubDate,
+                        description: item.description || item.content || '',
+                        media: item.enclosure && item.enclosure.link ? { url: item.enclosure.link, type: item.enclosure.type } : null
+                    }));
+                }
+            } catch (e) {}
+
+            // Strategy 2: AllOrigins
+            try {
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                const res = await fetch(proxyUrl);
+                const data = await res.json();
+                if (data.contents) {
+                     const items = parseXMLRSS(data.contents);
+                     if (items.length > 0) return items;
+                }
+            } catch(e) {}
+
+            // Strategy 3: CorsProxy
+            try {
+                const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+                if (res.ok) {
+                    const text = await res.text();
+                    const items = parseXMLRSS(text);
+                    if (items.length > 0) return items;
+                }
+            } catch(e) {}
+
+            return [];
+        };
+
+        const generateSummary = async (text, apiKey, baseUrl, model) => {
+            if (!apiKey) return "配置中缺失 API Key，请在设置中添加。";
+            const cleanText = text.replace(/<[^>]+>/g, '').substring(0, 8000);
+            const cleanBaseUrl = (baseUrl || 'https://api.deepseek.com').replace(/\/$/, '');
+            const aiModel = model || "deepseek-chat";
+
+            try {
+                const res = await fetch(`${cleanBaseUrl}/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                    body: JSON.stringify({
+                        model: aiModel,
+                        messages: [
+                            { role: "system", content: "你是一个专业的文章摘要助手。请用通俗易懂的中文，为用户总结这篇文章的核心观点。使用无序列表列出3-5个重点。保持客观，不要使用第一人称。" },
+                            { role: "user", content: cleanText }
+                        ],
+                        stream: false
+                    })
+                });
+                
+                if (res.status === 401) return "API Key 无效或已过期 (401)。请在设置中检查您的密钥。";
+                if (res.status === 403) return "API Key 权限不足 (403)。请检查您的账户余额或权限。";
+                if (res.status === 404) return `找不到模型 "${aiModel}" (404)。请检查模型名称是否正确。`;
+                if (res.status === 429) return "请求过于频繁 (429)。请稍后再试。";
+                
+                if (!res.ok) throw new Error(`API Error: ${res.status}`);
+                
+                const data = await res.json();
+                return data.choices?.[0]?.message?.content || "AI 未返回内容";
+            } catch (e) {
+                console.warn(e);
+                return `AI 服务请求失败: ${e.message}`;
+            }
+        };
+
+        // --- UI Components ---
+        const Toast = ({ toasts, removeToast }) => (
+            <div className="toast-container">
+                {toasts.map(t => (
+                    <div key={t.id} className={`toast ${t.type === 'error' ? 'error' : 'success'}`} onClick={() => removeToast(t.id)}>
+                        {t.msg}
+                    </div>
+                ))}
+            </div>
+        );
+
+        const Checkbox = ({ label, checked, onChange, icon }) => (
+            <label className="flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+                <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="w-4 h-4 rounded border-zinc-300 text-purple-600 focus:ring-purple-500" />
+                <div className="flex items-center gap-2 text-sm select-none flex-1">
+                    {icon && <span className="text-zinc-500">{icon}</span>}
+                    <span>{label}</span>
+                </div>
+            </label>
+        );
+
+        const BackupModal = ({ open, onClose, onConfirm, darkMode }) => {
+            const [includeFeeds, setIncludeFeeds] = useState(true);
+            const [includeFavorites, setIncludeFavorites] = useState(true);
+            const [includeSettings, setIncludeSettings] = useState(true);
+
+            if (!open) return null;
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className={cn("w-full max-w-sm rounded-xl shadow-2xl p-6 transition-all scale-100", darkMode ? "bg-zinc-900 border border-zinc-800 text-zinc-100" : "bg-white text-zinc-900")}>
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 rounded-full">
+                                <Icons.AlertTriangle className="w-6 h-6" />
+                            </div>
+                            <h3 className="text-lg font-bold">备份选项</h3>
+                        </div>
+                        
+                        <p className="text-xs mb-4 leading-relaxed opacity-80 text-zinc-500">
+                            选择要包含在备份文件中的数据。
+                        </p>
+                        
+                        <div className="space-y-1 mb-6 border border-zinc-100 dark:border-zinc-800 rounded-lg p-1">
+                            <Checkbox 
+                                label="订阅源列表" 
+                                checked={includeFeeds} 
+                                onChange={setIncludeFeeds} 
+                                icon={<Icons.Rss className="w-4 h-4"/>} 
+                            />
+                            <Checkbox 
+                                label="收藏的文章" 
+                                checked={includeFavorites} 
+                                onChange={setIncludeFavorites} 
+                                icon={<Icons.Star className="w-4 h-4"/>} 
+                            />
+                            <Checkbox 
+                                label="设置 & 密钥 (API Key, RSSHub节点)" 
+                                checked={includeSettings} 
+                                onChange={setIncludeSettings} 
+                                icon={<Icons.Settings className="w-4 h-4"/>} 
+                            />
+                        </div>
+
+                        {includeSettings && (
+                            <div className="text-xs text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400 p-2 rounded mb-6">
+                                注意：勾选“设置”将导出您的 API Key 和 RSSHub 节点信息，请妥善保管备份文件。
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                            <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">取消</button>
+                            <button onClick={() => onConfirm({ includeFeeds, includeFavorites, includeSettings })} className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 shadow-lg shadow-purple-500/20 flex items-center gap-2">
+                                <Icons.Download className="w-4 h-4" /> 确认下载
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const SettingsModal = ({ open, onClose, config, onSave, darkMode, addToast }) => {
+            const [local, setLocal] = useState(config);
+            const [availableModels, setAvailableModels] = useState([]);
+            const [isChecking, setIsChecking] = useState(false);
+
+            useEffect(() => { if (open) setLocal(config); }, [open, config]);
+            
+            if (!open) return null;
+
+            const COMMON_MODELS = [
+                "deepseek-chat",
+                "deepseek-reasoner",
+                "gpt-4o",
+                "gpt-4o-mini",
+                "gpt-3.5-turbo",
+                "claude-3-5-sonnet-20240620",
+                "gemini-1.5-pro",
+                "gemini-1.5-flash"
+            ];
+
+            const checkConnection = async () => {
+                if (!local.apiKey) {
+                    addToast("请先填写 API Key", "error");
+                    return;
+                }
+                setIsChecking(true);
+                const baseUrl = (local.baseUrl || 'https://api.deepseek.com').replace(/\/$/, '');
+                
+                try {
+                    // Try to fetch models from the standard endpoint
+                    const res = await fetch(`${baseUrl}/models`, {
+                        headers: { 'Authorization': `Bearer ${local.apiKey}` }
+                    });
+                    
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.data && Array.isArray(data.data)) {
+                            const fetchedIds = data.data.map(m => m.id).sort();
+                            setAvailableModels(fetchedIds);
+                            addToast(`连接成功！发现 ${fetchedIds.length} 个模型。`);
+                        } else {
+                            addToast("连接成功，但返回格式不标准，无法提取模型列表。", "error");
+                        }
+                    } else {
+                        addToast(`连接失败 (HTTP ${res.status})。请检查 Key 或 URL。`, "error");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    addToast(`请求失败: ${e.message}. 可能是跨域(CORS)限制。`, "error");
+                } finally {
+                    setIsChecking(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className={cn("w-full max-w-md rounded-xl shadow-2xl p-6 transition-all scale-100", darkMode ? "bg-zinc-900 border border-zinc-800 text-zinc-100" : "bg-white text-zinc-900")}>
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold flex items-center gap-2"><Icons.Settings className="w-5 h-5" /> AI 配置</h3>
+                            <button onClick={onClose}><Icons.X className="w-5 h-5" /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-medium text-zinc-500 mb-1">API Base URL</label>
+                                <input type="text" value={local.baseUrl} onChange={e => setLocal({...local, baseUrl: e.target.value})} className={cn("w-full px-3 py-2 rounded-lg text-sm border outline-none", darkMode ? "bg-zinc-950 border-zinc-800 focus:border-purple-500" : "bg-zinc-50 border-zinc-200 focus:border-purple-500")} placeholder="https://api.deepseek.com" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-zinc-500 mb-1">API Key</label>
+                                <input type="password" value={local.apiKey} onChange={e => setLocal({...local, apiKey: e.target.value})} className={cn("w-full px-3 py-2 rounded-lg text-sm border outline-none", darkMode ? "bg-zinc-950 border-zinc-800 focus:border-purple-500" : "bg-zinc-50 border-zinc-200 focus:border-purple-500")} placeholder="sk-..." />
+                            </div>
+                            
+                            {/* Health Check Button */}
+                            <div className="flex justify-end">
+                                <button 
+                                    onClick={checkConnection}
+                                    disabled={isChecking}
+                                    className={cn("flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors", 
+                                        isChecking ? "opacity-50 cursor-wait" : "hover:bg-zinc-100 dark:hover:bg-zinc-800 text-purple-600 dark:text-purple-400"
+                                    )}
+                                >
+                                    {isChecking ? <Icons.Loader className="w-3 h-3" /> : <Icons.Activity className="w-3 h-3" />}
+                                    {isChecking ? "检测中..." : "检测连接 & 获取模型"}
+                                </button>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-zinc-500 mb-1">模型名称 (Model ID)</label>
+                                <div className="space-y-2">
+                                    <input 
+                                        type="text" 
+                                        value={local.model || 'deepseek-chat'} 
+                                        onChange={e => setLocal({...local, model: e.target.value})} 
+                                        className={cn("w-full px-3 py-2 rounded-lg text-sm border outline-none", darkMode ? "bg-zinc-950 border-zinc-800 focus:border-purple-500" : "bg-zinc-50 border-zinc-200 focus:border-purple-500")} 
+                                        placeholder="例如: deepseek-chat" 
+                                        list="model-suggestions"
+                                    />
+                                    
+                                    {/* Default Suggestions (Hidden Datalist) */}
+                                    <datalist id="model-suggestions">
+                                        {COMMON_MODELS.map(m => <option key={m} value={m} />)}
+                                    </datalist>
+
+                                    {/* DETECTED MODELS SELECTOR (New UI) */}
+                                    {availableModels.length > 0 && (
+                                        <div className="animate-fade-in p-2 rounded bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/30">
+                                            <label className="block text-[10px] font-bold text-green-700 dark:text-green-400 mb-1">已检测到厂商模型 (点击选择):</label>
+                                            <select 
+                                                onChange={(e) => {
+                                                    if(e.target.value) setLocal({...local, model: e.target.value});
+                                                }}
+                                                className={cn("w-full px-2 py-1.5 rounded text-sm border outline-none cursor-pointer", darkMode ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300")}
+                                                value={availableModels.includes(local.model) ? local.model : ""}
+                                            >
+                                                <option value="" disabled>-- 请选择模型 --</option>
+                                                {availableModels.map(m => (
+                                                    <option key={m} value={m}>{m}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
+                                <p className="text-[10px] text-zinc-500 mt-1">
+                                    {availableModels.length > 0 
+                                        ? "上方绿色区域显示了即时检测到的模型，选择后会自动填入。" 
+                                        : "可以直接输入，或点击“检测”按钮获取可用模型列表。"}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-700">取消</button>
+                            <button onClick={() => onSave(local)} className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg flex items-center gap-2 hover:bg-purple-700 shadow-lg shadow-purple-500/20"><Icons.Save className="w-4 h-4" /> 保存</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const RSSGeneratorModal = ({ open, onClose, onSubscribe, darkMode }) => {
+            const [platform, setPlatform] = useState('bilibili');
+            const [inputVal, setInputVal] = useState('');
+            const [selectedType, setSelectedType] = useState('video');
+            const [baseUrl, setBaseUrl] = useState('https://eren.zeabur.app');
+            const [uid, setUid] = useState('');
+            const [generatedUrl, setGeneratedUrl] = useState('');
+            const [isNodeDropdownOpen, setIsNodeDropdownOpen] = useState(false);
+            
+            // Nodes State
+            const [customNodes, setCustomNodes] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('folo_nodes');
+                    return saved ? JSON.parse(saved) : DEFAULT_NODES;
+                } catch { return DEFAULT_NODES; }
+            });
+
+            // Persist Nodes
+            useEffect(() => {
+                localStorage.setItem('folo_nodes', JSON.stringify(customNodes));
+            }, [customNodes]);
+
+            const saveNode = (url) => {
+                if(url && !customNodes.includes(url)) {
+                    setCustomNodes([url, ...customNodes]);
+                }
+            };
+
+            const removeNode = (url) => {
+                if(confirm('确定删除该节点吗?')) {
+                    const newNodes = customNodes.filter(n => n !== url);
+                    setCustomNodes(newNodes);
+                    // If current base url is deleted, reset to first available or default
+                    if (baseUrl === url) {
+                        setBaseUrl(newNodes.length > 0 ? newNodes[0] : 'https://rsshub.app');
+                    }
+                }
+            };
+
+            // Logic from user code
+            useEffect(() => {
+                if (open) {
+                    setPlatform('bilibili');
+                    setInputVal('');
+                    setSelectedType('video');
+                    setUid('');
+                    setGeneratedUrl('');
+                }
+            }, [open]);
+
+            useEffect(() => {
+                if(GEN_PLATFORMS[platform].options.length > 0) {
+                    setSelectedType(GEN_PLATFORMS[platform].options[0].id);
+                }
+            }, [platform]);
+
+            useEffect(() => {
+                handleInputChange(inputVal);
+            }, [inputVal, platform, selectedType, baseUrl]);
+
+            const handleInputChange = (val) => {
+                let id = '';
+                const p = platform;
+                
+                if (!val.trim()) {
+                    setUid('');
+                    setGeneratedUrl('');
+                    return;
+                }
+
+                if (p === 'bilibili') {
+                    if (/^\d+$/.test(val)) id = val;
+                    else {
+                        const m = val.match(/(?:space\.bilibili\.com|bilibili\.com\/space)\/(\d+)/);
+                        if (m) id = m[1];
+                    }
+                } else if (p === 'youtube') {
+                    const handle = val.match(/@([\w.-]+)/);
+                    const channel = val.match(/(?:channel\/|UC)([\w-]{22})/);
+                    if (channel) {
+                        const raw = val.match(/channel\/(UC[\w-]{22})/) || val.match(/^(UC[\w-]{22})$/);
+                        id = raw ? raw[1] : (handle ? `@${handle[1]}` : '');
+                    } else if (handle) {
+                        id = `@${handle[1]}`;
+                    } else {
+                        if (val.startsWith('UC') && val.length === 24) id = val;
+                        else if (val.length > 0 && !val.includes('/')) id = val.startsWith('@') ? val : `@${val}`;
+                    }
+                } else if (p === 'weibo') {
+                    const m = val.match(/weibo\.com\/u\/(\d+)/);
+                    if (m) id = m[1];
+                    else if (/^\d{10}$/.test(val)) id = val;
+                    else if (selectedType === 'keyword') id = val.trim();
+                } else if (p === 'xiaoyuzhou') {
+                    const m = val.match(/podcast\/([a-fA-F0-9]{24})/);
+                    if (m) id = m[1];
+                    else if (/^[a-fA-F0-9]{24}$/.test(val)) id = val;
+                } else if (p === 'jike') {
+                    const um = val.match(/(?:users|u)\/([a-zA-Z0-9-]+)/);
+                    const tm = val.match(/topics\/([a-zA-Z0-9]+)/);
+                    if (um) { id = um[1]; setSelectedType('user'); }
+                    else if (tm) { id = tm[1]; setSelectedType('topic'); }
+                    else if (!val.includes('/')) id = val;
+                }
+
+                setUid(id);
+                
+                if (id) {
+                    let path = '';
+                    const opts = GEN_PLATFORMS[p].options;
+                    if (p === 'youtube') {
+                        const isChan = id.startsWith('UC');
+                        if (selectedType === 'community') path = `/youtube/community/${id}`;
+                        else path = isChan ? `/youtube/channel/${id}` : `/youtube/user/${id}`;
+                    } else if (p === 'weibo') {
+                        if (selectedType === 'keyword') path = `/weibo/keyword/${encodeURIComponent(id)}`;
+                        else path = `/weibo/user/${id}`;
+                    } else {
+                        const opt = opts.find(o => o.id === selectedType);
+                        if (opt && opt.path) path = `${opt.path}${id}`;
+                    }
+                    const cleanBase = baseUrl.replace(/\/$/, '');
+                    setGeneratedUrl(`${cleanBase}${path}`);
+                } else {
+                    setGeneratedUrl('');
+                }
+            };
+
+            const handleSubscribe = () => {
+                if (generatedUrl) {
+                    onSubscribe(generatedUrl, `${GEN_PLATFORMS[platform].name} Feed`);
+                    onClose();
+                }
+            };
+
+            if (!open) return null;
+
+            const p = GEN_PLATFORMS[platform];
+            const colors = p.colors;
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className={cn("w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]", darkMode ? "bg-zinc-900 border border-zinc-800" : "bg-white")}>
+                        {/* Header */}
+                        <div className="p-6 pb-2 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
+                            <div className="flex justify-between items-start">
+                                <div className="flex items-center gap-3">
+                                    <div className={cn("p-2 rounded-lg text-white", colors.bg.replace('bg-', 'bg-').replace('50', '500'))}>
+                                        <Icons.Rss className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h2 className={cn("text-xl font-bold", darkMode ? "text-zinc-100" : "text-zinc-900")}>RSS 订阅源生成器</h2>
+                                        <p className={cn("text-xs mt-1", darkMode ? "text-zinc-400" : "text-zinc-500")}>输入主页链接，自动生成 RSSHub 订阅源</p>
+                                    </div>
+                                </div>
+                                <button onClick={onClose} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors"><Icons.X className="w-5 h-5 text-zinc-500" /></button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                            {/* Tabs */}
+                            <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
+                                {Object.keys(GEN_PLATFORMS).map(key => {
+                                    const item = GEN_PLATFORMS[key];
+                                    const isActive = platform === key;
+                                    const ItemIcon = Icons[item.icon] || Icons.Rss;
+                                    return (
+                                        <button 
+                                            key={key}
+                                            onClick={() => setPlatform(key)}
+                                            className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all shrink-0 border", 
+                                                isActive 
+                                                    ? cn(item.colors.bg, item.colors.text, item.colors.border) 
+                                                    : (darkMode ? "bg-zinc-800 border-zinc-700 text-zinc-400" : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50")
+                                            )}
+                                        >
+                                            <ItemIcon className="w-4 h-4" />
+                                            {item.name}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+
+                            {/* Node Config */}
+                            <div className="mb-6 relative">
+                                <label className="block text-xs font-medium text-zinc-500 mb-1.5">RSSHub 服务节点</label>
+                                <div className="relative flex gap-2">
+                                    <div className="relative flex-1">
+                                        <input 
+                                            value={baseUrl}
+                                            onChange={e => setBaseUrl(e.target.value)}
+                                            className={cn("w-full px-3 py-2 text-sm rounded-lg border outline-none font-mono", darkMode ? "bg-zinc-950 border-zinc-800 text-zinc-300" : "bg-white border-zinc-300 text-zinc-700")}
+                                        />
+                                        <button 
+                                            onClick={() => setIsNodeDropdownOpen(!isNodeDropdownOpen)}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-400 hover:text-zinc-600"
+                                        >
+                                            <Icons.ChevronDown className="w-4 h-4" />
+                                        </button>
+                                        
+                                        {isNodeDropdownOpen && (
+                                            <div className={cn("absolute top-full left-0 w-full mt-1 rounded-lg border shadow-xl z-20 overflow-hidden max-h-48 overflow-y-auto custom-scrollbar", darkMode ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200")}>
+                                                {customNodes.map(node => (
+                                                    <div 
+                                                        key={node} 
+                                                        className={cn("px-3 py-2 text-xs font-mono flex justify-between items-center group hover:bg-zinc-100 dark:hover:bg-zinc-800", darkMode ? "text-zinc-400" : "text-zinc-600")}
+                                                    >
+                                                        <span 
+                                                            className="flex-1 cursor-pointer truncate mr-2"
+                                                            onClick={() => { setBaseUrl(node); setIsNodeDropdownOpen(false); }}
+                                                        >
+                                                            {node}
+                                                        </span>
+                                                        <button 
+                                                            onClick={(e) => { e.stopPropagation(); removeNode(node); }}
+                                                            className="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-500 transition-all"
+                                                        >
+                                                            <Icons.Trash className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                {customNodes.length === 0 && <div className="p-2 text-center text-xs text-zinc-500">暂无节点</div>}
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    <button 
+                                        onClick={() => saveNode(baseUrl)}
+                                        disabled={customNodes.includes(baseUrl)}
+                                        className={cn("px-3 rounded-lg border transition-colors flex items-center justify-center", 
+                                            customNodes.includes(baseUrl) 
+                                                ? (darkMode ? "bg-zinc-800 border-zinc-800 text-zinc-600" : "bg-zinc-100 border-zinc-200 text-zinc-400")
+                                                : (darkMode ? "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700" : "bg-white border-zinc-300 text-zinc-600 hover:bg-zinc-50")
+                                        )}
+                                        title={customNodes.includes(baseUrl) ? "已保存" : "保存节点"}
+                                    >
+                                        {customNodes.includes(baseUrl) ? <Icons.Check className="w-4 h-4" /> : <Icons.Save className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Input */}
+                            <div className="mb-6">
+                                <label className={cn("block text-sm font-medium mb-2", colors.text)}>第一步：输入 {p.name} 链接或 ID</label>
+                                <div className="relative">
+                                    <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                                        {uid ? <Icons.Check className="w-5 h-5 text-green-500" /> : <Icons.Link className="w-5 h-5 text-zinc-400" />}
+                                    </div>
+                                    <input 
+                                        value={inputVal}
+                                        onChange={e => setInputVal(e.target.value)}
+                                        placeholder={p.placeholder}
+                                        className={cn("w-full pl-10 pr-4 py-3 rounded-lg border outline-none transition-all", 
+                                            uid ? "border-green-500 ring-1 ring-green-500" : (darkMode ? "bg-zinc-950 border-zinc-800 focus:border-zinc-600" : "bg-white border-zinc-300 focus:border-zinc-400")
+                                        )}
+                                    />
+                                </div>
+                                {p.requiresAuth && (
+                                    <div className="mt-2 flex items-start gap-2 text-xs text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-100">
+                                        <Icons.AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                                        <span>部分内容可能需要服务端配置 Cookie (如高清视频、全部微博等)。</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Options */}
+                            <div className="mb-6">
+                                <label className={cn("block text-sm font-medium mb-2", colors.text)}>第二步：选择订阅类型</label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {p.options.map(opt => {
+                                        const isSel = selectedType === opt.id;
+                                        const OptIcon = Icons[opt.icon] || Icons.Rss;
+                                        return (
+                                            <div 
+                                                key={opt.id} 
+                                                onClick={() => setSelectedType(opt.id)}
+                                                className={cn("p-3 rounded-lg border cursor-pointer flex items-center gap-3 transition-all", 
+                                                    isSel 
+                                                        ? cn(colors.bg, colors.border, "ring-1", colors.text.replace('text-', 'ring-')) 
+                                                        : (darkMode ? "bg-zinc-950 border-zinc-800 hover:border-zinc-700" : "bg-white border-zinc-200 hover:border-zinc-300")
+                                                )}
+                                            >
+                                                <OptIcon className={cn("w-5 h-5", isSel ? colors.text : "text-zinc-400")} />
+                                                <div>
+                                                    <div className={cn("text-sm font-bold", isSel ? colors.text : (darkMode ? "text-zinc-300" : "text-zinc-700"))}>{opt.label}</div>
+                                                    <div className={cn("text-xs", isSel ? colors.text : "text-zinc-500")}>{opt.desc}</div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Result */}
+                            <div className={cn("transition-all duration-300", uid ? "opacity-100" : "opacity-50 grayscale pointer-events-none")}>
+                                <label className="block text-sm font-medium text-zinc-500 mb-2">生成结果</label>
+                                <div className="flex">
+                                    <input 
+                                        readOnly 
+                                        value={generatedUrl || '等待输入...'} 
+                                        className={cn("flex-1 px-4 py-3 text-sm rounded-l-lg border-y border-l bg-zinc-50 dark:bg-zinc-950 font-mono text-zinc-600 outline-none", darkMode ? "border-zinc-800" : "border-zinc-300")}
+                                    />
+                                    <button 
+                                        onClick={handleSubscribe}
+                                        className={cn("px-6 py-3 text-sm font-bold text-white rounded-r-lg flex items-center gap-2 transition-colors", 
+                                            uid ? "bg-green-600 hover:bg-green-700" : "bg-zinc-400 cursor-not-allowed"
+                                        )}
+                                    >
+                                        <Icons.Plus className="w-4 h-4" /> 立即订阅
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AppContent = () => {
+            // --- State Initialization Strategy: Seed vs LocalStorage ---
+            const getInitialState = (key, defaultVal) => {
+                try {
+                    const seedScript = document.getElementById('app-data');
+                    if (seedScript && seedScript.textContent !== 'null') {
+                        const seed = JSON.parse(seedScript.textContent);
+                        if (seed && seed[key]) return seed[key];
+                    }
+                } catch (e) { console.error("Seed Parse Error", e); }
+
+                try {
+                    const saved = localStorage.getItem(`folo_${key}`);
+                    if (saved) return JSON.parse(saved);
+                } catch (e) { console.error("LS Error", e); }
+
+                return defaultVal;
+            };
+
+            const [feeds, setFeeds] = useState(() => getInitialState('feeds', INITIAL_FEEDS));
+            const [favorites, setFavorites] = useState(() => getInitialState('favorites', []));
+            const [aiConfig, setAiConfig] = useState(() => getInitialState('aiConfig', { apiKey: '', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' }));
+            
+            const [articles, setArticles] = useState([]);
+            const [selectedArticle, setSelectedArticle] = useState(null);
+            const [selectedFeedId, setSelectedFeedId] = useState('ALL'); // 'ALL', 'FAVORITES', 'LIBRARY', or feedId
+            // Removed selectedLibraryCategory
+            const [sidebarOpen, setSidebarOpen] = useState(true);
+            const [loading, setLoading] = useState(false);
+            const [aiLoading, setAiLoading] = useState(false);
+            const [aiSummary, setAiSummary] = useState(null);
+            const [newFeedUrl, setNewFeedUrl] = useState('');
+            const [darkMode, setDarkMode] = useState(true);
+            const [isAdding, setIsAdding] = useState(false);
+            const [showSettings, setShowSettings] = useState(false);
+            const [showGenerator, setShowGenerator] = useState(false);
+            const [showBackupModal, setShowBackupModal] = useState(false); // Added for backup confirmation
+            const [toasts, setToasts] = useState([]);
+
+            // --- Persistence ---
+            useEffect(() => { localStorage.setItem('folo_feeds', JSON.stringify(feeds)); }, [feeds]);
+            useEffect(() => { localStorage.setItem('folo_favorites', JSON.stringify(favorites)); }, [favorites]);
+            useEffect(() => { localStorage.setItem('folo_aiConfig', JSON.stringify(aiConfig)); }, [aiConfig]);
+
+            useEffect(() => {
+                if (darkMode) document.documentElement.classList.add('dark');
+                else document.documentElement.classList.remove('dark');
+            }, [darkMode]);
+
+            // --- Helpers ---
+            const addToast = (msg, type = 'success') => {
+                const id = Date.now();
+                setToasts(prev => [...prev, { id, msg, type }]);
+                setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+            };
+            const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
+
+            // --- Data Fetching ---
+            const loadArticles = async (feedList) => {
+                if (selectedFeedId === 'LIBRARY') return; // Don't fetch when in Library mode
+
+                setLoading(true);
+                const list = feedList.length > 0 ? feedList : []; // Empty list if no feeds
+                
+                if (list.length === 0) {
+                    setArticles([]);
+                    setLoading(false);
+                    return;
+                }
+
+                const promises = list.map(async feed => {
+                    const items = await fetchRSS(feed.url);
+                    return items.map(i => ({ ...i, feedId: feed.id }));
+                });
+                
+                const results = await Promise.all(promises);
+                const flat = results.flat();
+                
+                const uniqueMap = new Map();
+                flat.forEach(item => uniqueMap.set(item.id, item));
+                const sorted = Array.from(uniqueMap.values()).sort((a, b) => new Date(b.isoDate) - new Date(a.isoDate));
+                
+                setArticles(sorted);
+                setLoading(false);
+            };
+
+            useEffect(() => { 
+                loadArticles(feeds);
+            }, [feeds]);
+
+            // --- Download Self Feature (Modified to handle actual download with filters) ---
+            const processDownload = ({ includeFeeds, includeFavorites, includeSettings }) => {
+                try {
+                    // Filter Data based on selection
+                    const backupData = {};
+                    if (includeFeeds) backupData.feeds = feeds;
+                    if (includeFavorites) backupData.favorites = favorites;
+                    if (includeSettings) backupData.aiConfig = aiConfig;
+
+                    // Also save custom nodes if settings are included (using localStorage approach from generator)
+                    // Since nodes are stored in localStorage 'folo_nodes', if we want them in backup, we need to inject them?
+                    // The generator component manages nodes independently. Let's leave them out or include if desired.
+                    // For simplicity, we just backup the main state. Nodes are client-cache.
+                    
+                    let htmlContent = document.documentElement.outerHTML;
+                    
+                    const scriptTagRegex = new RegExp('<script id="app-data" type="application/json">([\\s\\S]*?)<\\/script>');
+                    const closingTag = '<' + '/script>';
+                    const newScriptTag = `<script id="app-data" type="application/json">${JSON.stringify(backupData)}${closingTag}`;
+                    
+                    htmlContent = htmlContent.replace(scriptTagRegex, newScriptTag);
+
+                    const blob = new Blob([htmlContent], { type: 'text/html' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `FoloMini_Backup_${new Date().toISOString().split('T')[0]}.html`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    addToast("下载成功！请妥善保管此文件。");
+                    setShowBackupModal(false);
+                } catch (e) {
+                    console.error(e);
+                    addToast("下载失败", "error");
+                }
+            };
+
+            // --- Logic ---
+            const displayedArticles = useMemo(() => {
+                if (selectedFeedId === 'LIBRARY') return [];
+                if (selectedFeedId === 'FAVORITES') return favorites.sort((a, b) => new Date(b.isoDate) - new Date(a.isoDate));
+                if (selectedFeedId === 'ALL') return articles;
+                return articles.filter(a => a.feedId === selectedFeedId);
+            }, [selectedFeedId, articles, favorites]);
+
+            const toggleFavorite = (e, article) => {
+                e.stopPropagation();
+                const existing = favorites.find(f => f.id === article.id);
+                if (existing) {
+                    setFavorites(prev => prev.filter(f => f.id !== article.id));
+                    addToast("已取消收藏");
+                } else {
+                    setFavorites(prev => [...prev, {
+                        ...article,
+                        savedAt: new Date().toISOString()
+                    }]);
+                    addToast("已添加收藏");
+                }
+            };
+
+            const isFavorite = (article) => favorites.some(f => f.id === article.id);
+
+            const handleSidebarSubmit = (e) => {
+                e.preventDefault();
+                if (!newFeedUrl.trim()) {
+                    setShowGenerator(true);
+                } else {
+                    addFeed(newFeedUrl);
+                }
+            };
+
+            const addFeed = async (url) => {
+                if (!url) return;
+                setIsAdding(true);
+                const items = await fetchRSS(url);
+                if (items.length > 0) {
+                    const exists = feeds.some(f => f.url === url);
+                    if (!exists) {
+                        setFeeds(prev => [...prev, {
+                            id: Date.now().toString(),
+                            url: url, 
+                            title: items[0].feedTitle || 'New Feed', 
+                            createdAt: new Date().toISOString()
+                        }]);
+                        setNewFeedUrl('');
+                        addToast("订阅成功");
+                    } else {
+                        addToast("该源已存在", "error");
+                    }
+                } else {
+                    addToast("无法解析该 RSS 地址", "error");
+                }
+                setIsAdding(false);
+            };
+
+            const addFeedDirectly = (item) => {
+                const exists = feeds.some(f => f.url === item.url);
+                if (exists) return;
+                setFeeds(prev => [...prev, {
+                    id: Date.now().toString(),
+                    url: item.url, 
+                    title: item.title, 
+                    createdAt: new Date().toISOString()
+                }]);
+                addToast(`已订阅: ${item.title}`);
+            };
+
+            const onGeneratorSubscribe = async (url, title) => {
+                // Pre-check if valid RSS (optional, but good UX)
+                setIsAdding(true);
+                const items = await fetchRSS(url);
+                if (items.length > 0) {
+                    const exists = feeds.some(f => f.url === url);
+                    if (!exists) {
+                        setFeeds(prev => [...prev, {
+                            id: Date.now().toString(),
+                            url: url, 
+                            title: items[0].feedTitle || title, 
+                            createdAt: new Date().toISOString()
+                        }]);
+                        addToast("生成并订阅成功！");
+                    } else {
+                        addToast("该源已存在", "error");
+                    }
+                } else {
+                    addToast("生成的 RSS 无法访问，请检查 ID 或网络", "error");
+                }
+                setIsAdding(false);
+            };
+
+            const delFeed = (id) => {
+                if (confirm('确定删除此订阅源吗?')) {
+                    if (selectedFeedId === id) setSelectedFeedId('ALL');
+                    setFeeds(prev => prev.filter(f => f.id !== id));
+                    addToast("已删除订阅源");
+                }
+            };
+
+            const saveSettings = (cfg) => {
+                setAiConfig(cfg);
+                setShowSettings(false);
+                addToast("设置已保存");
+            };
+
+            const getSummary = async () => {
+                if (!selectedArticle) return;
+                setAiLoading(true);
+                const text = (selectedArticle.content || selectedArticle.description || '').replace(/<[^>]+>/g, '');
+                const res = await generateSummary(selectedArticle.title + "\n" + text, aiConfig.apiKey, aiConfig.baseUrl, aiConfig.model);
+                setAiSummary(res);
+                setAiLoading(false);
+            };
+
+            const getActiveTitle = () => {
+                if (selectedFeedId === 'LIBRARY') return '发现资源';
+                if (selectedFeedId === 'ALL') return '最新文章';
+                if (selectedFeedId === 'FAVORITES') return '我的收藏';
+                return (feeds.find(f => f.id === selectedFeedId) || INITIAL_FEEDS.find(f => f.id === selectedFeedId))?.title || '频道文章';
+            };
+
+            // --- Render ---
+            return (
+                <div className={cn("flex h-screen w-full overflow-hidden transition-colors duration-300 font-sans selection:bg-orange-200 selection:text-orange-900", darkMode ? "bg-zinc-950 text-zinc-100 selection:bg-orange-900 selection:text-orange-100" : "bg-zinc-50 text-zinc-900")}>
+                    <Toast toasts={toasts} removeToast={removeToast} />
+                    <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} config={aiConfig} onSave={saveSettings} darkMode={darkMode} addToast={addToast} />
+                    <RSSGeneratorModal open={showGenerator} onClose={() => setShowGenerator(false)} onSubscribe={onGeneratorSubscribe} darkMode={darkMode} />
+                    <BackupModal open={showBackupModal} onClose={() => setShowBackupModal(false)} onConfirm={processDownload} darkMode={darkMode} />
+
+                    {/* Sidebar */}
+                    <div className={cn("flex flex-col border-r transition-all duration-300 absolute md:relative z-20 h-full shadow-xl md:shadow-none", darkMode ? "border-zinc-800 bg-zinc-950/95" : "border-zinc-200 bg-white/95", sidebarOpen ? "w-64 translate-x-0" : "w-0 -translate-x-full md:w-0 md:translate-x-0 opacity-0 md:opacity-100 overflow-hidden")}>
+                        <div className="p-4 flex items-center justify-between border-b border-zinc-800/50 h-14 shrink-0">
+                            <div className="flex items-center gap-2 font-bold text-lg tracking-tight"><Icons.Rss className="w-5 h-5 text-orange-600" /><span>Folo Mini <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-1 py-0.5 rounded ml-1">Local</span></span></div>
+                            <button onClick={() => setSidebarOpen(false)} className="md:hidden"><Icons.X className="w-5 h-5" /></button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                            <div className="space-y-1 mb-6">
+                                <div 
+                                    onClick={() => { setSelectedFeedId('ALL'); if(window.innerWidth < 768) setSidebarOpen(false); }}
+                                    className={cn("flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition-all", selectedFeedId === 'ALL' ? (darkMode ? "bg-zinc-800 text-orange-400" : "bg-orange-50 text-orange-700 font-medium") : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900")}
+                                >
+                                    <Icons.Layers className="w-4 h-4" />
+                                    <span>全部文章</span>
+                                </div>
+                                <div 
+                                    onClick={() => { setSelectedFeedId('FAVORITES'); if(window.innerWidth < 768) setSidebarOpen(false); }}
+                                    className={cn("flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition-all", selectedFeedId === 'FAVORITES' ? (darkMode ? "bg-zinc-800 text-yellow-400" : "bg-yellow-50 text-yellow-700 font-medium") : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900")}
+                                >
+                                    <Icons.Star className={cn("w-4 h-4", selectedFeedId === 'FAVORITES' ? "fill-current" : "")} />
+                                    <span>我的收藏</span>
+                                </div>
+                            </div>
+
+                            <div className="text-[10px] font-bold text-zinc-500 mb-2 px-2 uppercase tracking-wider flex justify-between items-center">
+                                <span>我的订阅</span>
+                                <span className="text-zinc-600">{feeds.length}</span>
+                            </div>
+                            <div className="space-y-0.5">
+                                {feeds.map(feed => (
+                                    <div 
+                                        key={feed.id} 
+                                        onClick={() => { setSelectedFeedId(feed.id); if(window.innerWidth < 768) setSidebarOpen(false); }}
+                                        className={cn(
+                                            "group flex items-center justify-between px-3 py-2 rounded-md text-sm cursor-pointer transition-all",
+                                            selectedFeedId === feed.id
+                                                ? (darkMode ? "bg-zinc-800 text-white" : "bg-white shadow-sm border border-zinc-200 text-black")
+                                                : (darkMode ? "text-zinc-400 hover:bg-zinc-900" : "text-zinc-600 hover:bg-zinc-100")
+                                        )}
+                                    >
+                                        <span className="truncate flex-1">{feed.title}</span>
+                                        <button onClick={(e) => { e.stopPropagation(); delFeed(feed.id); }} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 p-1 transition-opacity"><Icons.Trash className="w-3.5 h-3.5" /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="p-3 border-t border-zinc-800/50 flex flex-col gap-2 shrink-0 bg-zinc-50/50 dark:bg-zinc-900/50">
+                            <form onSubmit={handleSidebarSubmit} className="flex gap-2 group relative">
+                                <input type="url" placeholder="输入 RSS 或留空打开生成器..." value={newFeedUrl} onChange={e => setNewFeedUrl(e.target.value)} className={cn("flex-1 px-3 py-2 text-xs rounded-md border outline-none transition-all", darkMode ? "bg-zinc-950 border-zinc-800 focus:border-zinc-700" : "bg-white border-zinc-300 focus:border-zinc-400")} />
+                                <button type="submit" disabled={isAdding} className={cn("p-2 text-white rounded-md disabled:opacity-50 transition-colors flex items-center justify-center", newFeedUrl ? "bg-orange-600 hover:bg-orange-700" : "bg-purple-600 hover:bg-purple-700")} title={newFeedUrl ? "添加 RSS" : "打开生成器"}>
+                                    {isAdding ? <Icons.Loader className="w-4 h-4"/> : (newFeedUrl ? <Icons.Plus className="w-4 h-4"/> : <Icons.Sparkles className="w-4 h-4"/>)}
+                                </button>
+                            </form>
+                            <div className="flex gap-2">
+                                <button onClick={() => setShowSettings(true)} className={cn("flex-1 flex items-center justify-center gap-2 py-2 text-xs rounded-md border border-dashed transition-colors", darkMode ? "border-zinc-800 hover:bg-zinc-900 text-zinc-500" : "border-zinc-300 hover:bg-white text-zinc-600")}>
+                                    <Icons.Settings className="w-3.5 h-3.5" /> AI
+                                </button>
+                                <button onClick={() => setShowBackupModal(true)} className={cn("flex-1 flex items-center justify-center gap-2 py-2 text-xs rounded-md border border-dashed transition-colors", darkMode ? "border-zinc-800 hover:bg-zinc-900 text-purple-400" : "border-zinc-300 hover:bg-white text-purple-600")} title="下载当前版本（包含所有数据）">
+                                    <Icons.Download className="w-3.5 h-3.5" /> 备份
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Middle Column (Articles OR Library) */}
+                    <div className={cn("flex flex-col w-full md:w-80 lg:w-96 border-r transition-all duration-300 shrink-0", darkMode ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-zinc-50", selectedArticle ? "hidden md:flex" : "flex")}>
+                        <div className="h-14 flex items-center justify-between px-4 border-b border-zinc-800/10 shrink-0 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm">
+                            <div className="flex items-center gap-3 overflow-hidden">
+                                <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1 hover:bg-zinc-700/10 rounded-md transition-colors"><Icons.Menu className="w-5 h-5 text-zinc-500" /></button>
+                                <h2 className="font-semibold truncate text-sm">{getActiveTitle()}</h2>
+                            </div>
+                            {selectedFeedId !== 'LIBRARY' && (
+                                <button onClick={() => loadArticles(feeds)} className="p-1.5 rounded-full hover:bg-zinc-500/10 text-zinc-500 transition-colors"><Icons.Refresh className={cn("w-4 h-4", loading && "animate-spin")} /></button>
+                            )}
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                            {/* Regular Article List */}
+                            {loading && articles.length === 0 ? (
+                                <div className="flex flex-col justify-center items-center h-40 gap-2 text-zinc-500 text-xs">
+                                    <Icons.Loader className="w-6 h-6 animate-spin"/>
+                                    <span>正在获取最新的内容...</span>
+                                </div>
+                            ) : displayedArticles.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-40 text-zinc-400 text-sm gap-2">
+                                    <Icons.Rss className="w-8 h-8 opacity-20"/>
+                                    <span>{selectedFeedId === 'FAVORITES' ? '暂无收藏' : '没有找到文章'}</span>
+                                </div>
+                            ) : (
+                                displayedArticles.map((article) => {
+                                    const fav = isFavorite(article);
+                                    const isActive = selectedArticle?.id === article.id;
+                                    return (
+                                        <div key={article.id} onClick={() => { setSelectedArticle(article); setAiSummary(null); }} className={cn("p-4 border-b cursor-pointer transition-all relative group", darkMode ? "border-zinc-800 hover:bg-zinc-800/60" : "border-zinc-200 hover:bg-white", isActive && (darkMode ? "bg-zinc-800/80 border-l-2 border-l-orange-500" : "bg-white shadow-sm border-l-2 border-l-orange-500"))}>
+                                            <div className="flex items-center justify-between mb-1.5">
+                                                <div className="flex items-center gap-2 overflow-hidden">
+                                                    <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded uppercase max-w-[120px] truncate", darkMode ? "bg-zinc-800 text-zinc-400" : "bg-zinc-200 text-zinc-600")}>{article.feedTitle}</span>
+                                                    <span className="text-[10px] text-zinc-500 shrink-0">{new Date(article.isoDate).toLocaleDateString()}</span>
+                                                    {/* Media Icon Indicator */}
+                                                    {article.media && (
+                                                        <span className={cn("text-[10px] flex items-center gap-1 px-1.5 py-0.5 rounded", darkMode ? "bg-zinc-700 text-zinc-300" : "bg-zinc-100 text-zinc-600")}>
+                                                            {article.media.type?.startsWith('video') ? <Icons.Video className="w-3 h-3" /> : <Icons.Headphones className="w-3 h-3" />}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <button 
+                                                    onClick={(e) => toggleFavorite(e, article)}
+                                                    className={cn("p-1.5 rounded-full transition-all md:opacity-0 group-hover:opacity-100 focus:opacity-100", fav ? "text-yellow-500 opacity-100" : "text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 hover:text-yellow-500")}
+                                                >
+                                                    <Icons.Star className={cn("w-3.5 h-3.5", fav ? "fill-current" : "")} />
+                                                </button>
+                                            </div>
+                                            <h3 className={cn("font-medium text-sm leading-snug line-clamp-2 mb-1.5", darkMode ? "text-zinc-200" : "text-zinc-800")}>{article.title}</h3>
+                                            <p className="text-xs text-zinc-500 leading-relaxed line-clamp-2">{(article.description || '').replace(/<[^>]+>/g, '').substring(0, 120)}</p>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Reader */}
+                    <div className={cn("flex-1 flex flex-col h-full absolute inset-0 md:relative z-30 md:z-0 bg-white dark:bg-zinc-950 transition-transform duration-300", !selectedArticle ? "translate-x-full md:translate-x-0" : "translate-x-0")}>
+                        {selectedArticle ? (
+                            <>
+                                <div className={cn("h-14 flex items-center justify-between px-4 border-b shrink-0", darkMode ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-white")}>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => setSelectedArticle(null)} className="md:hidden p-2 -ml-2 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><Icons.Left className="w-5 h-5" /></button>
+                                        <div className="hidden md:block text-xs text-zinc-400 px-2 py-1 bg-zinc-100 dark:bg-zinc-900 rounded">来源: {selectedArticle.feedTitle}</div>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <button 
+                                            onClick={(e) => toggleFavorite(e, selectedArticle)}
+                                            className={cn("p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors", isFavorite(selectedArticle) ? "text-yellow-500" : "text-zinc-400")}
+                                            title="收藏"
+                                        >
+                                            <Icons.Star className={cn("w-4 h-4", isFavorite(selectedArticle) ? "fill-current" : "")} />
+                                        </button>
+                                        <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-400 transition-colors" title="切换模式">{darkMode ? <Icons.Sun className="w-4 h-4"/> : <Icons.Moon className="w-4 h-4"/>}</button>
+                                        <a href={selectedArticle.link} target="_blank" className="p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-400 transition-colors" title="原文链接"><Icons.ExternalLink className="w-4 h-4"/></a>
+                                    </div>
+                                </div>
+                                <div className="flex-1 overflow-y-auto custom-scrollbar scroll-smooth">
+                                    <div className="max-w-3xl mx-auto p-6 md:p-12">
+                                        <h1 className="text-2xl md:text-4xl font-bold mb-6 text-zinc-900 dark:text-zinc-50 leading-tight">
+                                            <a 
+                                                href={selectedArticle.link} 
+                                                target="_blank" 
+                                                rel="noopener noreferrer"
+                                                className="hover:text-orange-600 dark:hover:text-orange-400 hover:underline decoration-2 underline-offset-4 transition-colors"
+                                                title="点击访问原网页"
+                                            >
+                                                {selectedArticle.title}
+                                            </a>
+                                        </h1>
+                                        <div className="flex gap-4 text-sm text-zinc-500 mb-8 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+                                            <span>{selectedArticle.author || selectedArticle.feedTitle}</span>
+                                            <span>&bull;</span>
+                                            <span>{new Date(selectedArticle.isoDate).toLocaleString()}</span>
+                                        </div>
+
+                                        {/* Media Player Block */}
+                                        {selectedArticle.media && (
+                                            <div className="mb-10 animate-fade-in">
+                                                {selectedArticle.media.type?.startsWith('video') ? (
+                                                    <div className="rounded-xl overflow-hidden shadow-lg bg-black">
+                                                        <video controls className="w-full aspect-video" src={selectedArticle.media.url} poster={selectedArticle.enclosure?.poster}></video>
+                                                    </div>
+                                                ) : (
+                                                    <div className={cn("rounded-xl p-4 flex items-center gap-4 border shadow-sm", darkMode ? "bg-zinc-900 border-zinc-800" : "bg-zinc-100 border-zinc-200")}>
+                                                        <div className={cn("w-12 h-12 rounded-full flex items-center justify-center shrink-0", darkMode ? "bg-orange-900/30 text-orange-500" : "bg-orange-100 text-orange-600")}>
+                                                            <Icons.Play className="w-5 h-5 fill-current ml-0.5" />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className={cn("text-xs font-bold uppercase tracking-wider mb-2", darkMode ? "text-zinc-500" : "text-zinc-400")}>Audio Player</div>
+                                                            <audio controls className="w-full h-8" src={selectedArticle.media.url}></audio>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        
+                                        {/* AI Summary Block */}
+                                        <div className={cn("mb-10 rounded-xl overflow-hidden border transition-all", darkMode ? "bg-zinc-900/30 border-purple-900/30" : "bg-purple-50/50 border-purple-100")}>
+                                            <div className="px-5 py-3 flex justify-between items-center border-b border-zinc-500/10 bg-zinc-50/50 dark:bg-white/5">
+                                                <div className="flex items-center gap-2 text-sm font-semibold text-purple-600 dark:text-purple-400"><Icons.Sparkles className="w-4 h-4" /> AI 智能概览</div>
+                                                {!aiSummary && !aiLoading && <button onClick={getSummary} className="text-xs bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-purple-500 text-zinc-600 dark:text-zinc-300 px-3 py-1.5 rounded-full transition-all shadow-sm">点击生成摘要</button>}
+                                            </div>
+                                            {(aiSummary || aiLoading) && (
+                                                <div className="p-5 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
+                                                    {aiLoading ? (
+                                                        <div className="flex flex-col gap-2 animate-pulse">
+                                                            <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-3/4"></div>
+                                                            <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-full"></div>
+                                                            <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-2/3"></div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="prose prose-sm dark:prose-invert max-w-none">
+                                                            <React.Fragment>
+                                                                {aiSummary.split('\n').map((line, i) => <p key={i}>{line}</p>)}
+                                                            </React.Fragment>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className={cn("prose max-w-none break-words pb-20", darkMode ? "prose-invert prose-p:text-zinc-300 prose-headings:text-zinc-100 prose-a:text-orange-400 hover:prose-a:text-orange-300 prose-blockquote:border-orange-500" : "prose-zinc prose-a:text-orange-600 hover:prose-a:text-orange-700 prose-blockquote:border-orange-500")} dangerouslySetInnerHTML={{ __html: selectedArticle.content || selectedArticle.description }} />
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-full text-zinc-400 select-none">
+                                <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-900 rounded-full flex items-center justify-center mb-6 animate-pulse"><Icons.Rss className="w-10 h-10 opacity-30" /></div>
+                                <p className="text-lg font-medium">Folo Mini</p>
+                                <p className="text-sm opacity-60 mt-2">选择左侧文章开始阅读</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AppContent />);
+    </script>
+</body>
+</html>

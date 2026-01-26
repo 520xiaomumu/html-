@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>粒子生命 (Particle Life) - 时间控制版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            color: #eee;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+        canvas {
+            display: block;
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #666; }
+        .glass-panel {
+            background: rgba(20, 20, 20, 0.9);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            height: 4px; background: #444; outline: none; opacity: 0.8;
+            transition: opacity .2s; border-radius: 2px;
+        }
+        .slider-thumb:hover { opacity: 1; }
+        .slider-thumb::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 14px; height: 14px; background: #4ade80;
+            cursor: pointer; border-radius: 50%; border: 2px solid #222;
+        }
+        .slider-thumb.red::-webkit-slider-thumb { background: #ff5555; }
+        .slider-thumb.green::-webkit-slider-thumb { background: #55ff55; }
+        .slider-thumb.blue::-webkit-slider-thumb { background: #5555ff; }
+        .slider-thumb.yellow::-webkit-slider-thumb { background: #ffff55; }
+        .slider-thumb.time::-webkit-slider-thumb { background: #f472b6; width: 16px; height: 16px; }
+        
+        .matrix-cell input { transform: scale(0.85); background: #111; border-color: #333; }
+        .matrix-cell input:focus { border-color: #4ade80; }
+    </style>
+</head>
+<body class="flex h-screen w-screen">
+
+    <!-- 左侧控制面板 -->
+    <div class="glass-panel w-80 h-full flex flex-col p-5 overflow-y-auto shrink-0 z-10 shadow-2xl border-r border-gray-800">
+        <h1 class="text-2xl font-bold mb-1 text-white flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_#22c55e]"></span>
+            粒子生命 <span class="text-xs font-normal text-gray-500 mt-1">v2.0</span>
+        </h1>
+        <p class="text-xs text-gray-400 mb-6">物理引擎 1:1 复刻 + 时间控制</p>
+
+        <!-- 全局控制 -->
+        <div class="mb-6 space-y-3">
+            <button id="btn-randomize" class="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-lg font-bold shadow-lg shadow-indigo-900/20 transition-all active:scale-95 text-sm tracking-wide">
+                🎲 随机生成规则
+            </button>
+            <div class="flex gap-2">
+                <button id="btn-reset" class="flex-1 py-1.5 px-3 bg-gray-700 hover:bg-gray-600 rounded text-xs transition border border-gray-600">重置画布</button>
+                <button id="btn-pause" class="flex-1 py-1.5 px-3 bg-gray-700 hover:bg-gray-600 rounded text-xs transition border border-gray-600">暂停/继续</button>
+            </div>
+        </div>
+
+        <hr class="border-gray-800 mb-6">
+        
+        <!-- 时间控制 (新增) -->
+        <div class="mb-6 bg-gray-800/50 p-3 rounded-lg border border-gray-700/50">
+            <h3 class="text-xs font-bold text-pink-400 mb-3 uppercase tracking-wider flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                时间速率 (Time Scale)
+            </h3>
+            <div class="flex flex-col gap-1">
+                <div class="flex justify-between items-end mb-1">
+                    <span class="text-[10px] text-gray-500">慢放</span>
+                    <span id="val-time" class="text-xl font-mono text-pink-400 font-bold">1.0x</span>
+                    <span class="text-[10px] text-gray-500">快进</span>
+                </div>
+                <!-- Logarithmic slider feel implementation in JS -->
+                <input type="range" id="param-time" min="1" max="50" value="10" class="slider-thumb time w-full">
+                <div class="flex justify-between text-[10px] text-gray-600 mt-1">
+                    <span>0.1x</span>
+                    <span>1.0x</span>
+                    <span>5.0x</span>
+                </div>
+            </div>
+            <p class="text-[10px] text-gray-500 mt-2 leading-tight">
+                * 调节速率不会改变粒子运动轨迹，仅改变观测速度。慢放时包含线性插值以保证丝滑。
+            </p>
+        </div>
+
+        <hr class="border-gray-800 mb-6">
+
+        <!-- 粒子数量 -->
+        <div class="mb-6">
+            <h3 class="text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">粒子数量</h3>
+            <div class="space-y-4">
+                <div class="flex items-center justify-between group">
+                    <label class="text-xs text-red-400 font-medium group-hover:text-red-300 transition">红色</label>
+                    <input type="range" id="count-red" min="0" max="1000" value="200" class="slider-thumb red w-28">
+                    <span id="val-red" class="text-xs w-8 text-right font-mono text-gray-400">200</span>
+                </div>
+                <div class="flex items-center justify-between group">
+                    <label class="text-xs text-green-400 font-medium group-hover:text-green-300 transition">绿色</label>
+                    <input type="range" id="count-green" min="0" max="1000" value="200" class="slider-thumb green w-28">
+                    <span id="val-green" class="text-xs w-8 text-right font-mono text-gray-400">200</span>
+                </div>
+                <div class="flex items-center justify-between group">
+                    <label class="text-xs text-blue-400 font-medium group-hover:text-blue-300 transition">蓝色</label>
+                    <input type="range" id="count-blue" min="0" max="1000" value="200" class="slider-thumb blue w-28">
+                    <span id="val-blue" class="text-xs w-8 text-right font-mono text-gray-400">200</span>
+                </div>
+                <div class="flex items-center justify-between group">
+                    <label class="text-xs text-yellow-400 font-medium group-hover:text-yellow-300 transition">黄色</label>
+                    <input type="range" id="count-yellow" min="0" max="1000" value="200" class="slider-thumb yellow w-28">
+                    <span id="val-yellow" class="text-xs w-8 text-right font-mono text-gray-400">200</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 交互规则矩阵 -->
+        <div class="mb-6">
+            <h3 class="text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider flex justify-between items-center">
+                <span>交互力 G</span>
+                <span class="text-[10px] text-gray-600 normal-case">行:受力 / 列:施力</span>
+            </h3>
+            
+            <div class="grid grid-cols-5 gap-1 mb-1 text-center text-[10px] font-bold opacity-80">
+                <div></div>
+                <div class="text-red-500">红</div>
+                <div class="text-green-500">绿</div>
+                <div class="text-blue-500">蓝</div>
+                <div class="text-yellow-500">黄</div>
+            </div>
+
+            <div id="rules-matrix" class="grid grid-cols-5 gap-1 text-xs items-center"></div>
+        </div>
+
+        <!-- 物理参数 -->
+        <div class="mt-auto">
+            <h3 class="text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">物理环境</h3>
+            <div class="flex flex-col">
+                <div class="flex justify-between mb-1">
+                    <label class="text-xs text-gray-500">交互半径</label>
+                    <span id="val-range" class="text-xs font-mono text-gray-400">80</span>
+                </div>
+                <input type="range" id="param-range" min="10" max="200" value="80" class="slider-thumb w-full">
+            </div>
+        </div>
+    </div>
+
+    <!-- 游戏画布 -->
+    <div class="flex-1 relative bg-black cursor-crosshair overflow-hidden">
+        <canvas id="gameCanvas" class="absolute inset-0 block touch-none"></canvas>
+        
+        <!-- HUD -->
+        <div class="absolute top-4 right-6 text-right pointer-events-none select-none space-y-1">
+            <div class="text-xs text-gray-500 font-mono tracking-wider">FPS: <span id="fps-counter" class="text-white font-bold">60</span></div>
+            <div class="text-xs text-gray-500 font-mono tracking-wider">Part: <span id="total-particles" class="text-white">0</span></div>
+            <div class="text-[10px] text-gray-600 font-mono mt-2 opacity-50">LEFT CLICK: REPEL PULSE</div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 粒子生命 (Particle Life) 2.0 - 时间控制版
+         * 核心改进: 使用 Accumulator 模式分离物理更新与渲染
+         */
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d', { alpha: false }); 
+
+        // 系统状态
+        let width, height;
+        let particles = [];
+        let ruleMatrix = []; 
+        const colors = ['#FF4444', '#44FF44', '#4444FF', '#FFFF44']; 
+        
+        // 参数
+        let atomCounts = [200, 200, 200, 200];
+        let cutOff = 80;
+        let isPaused = false;
+        
+        // 时间控制核心变量
+        let timeScale = 1.0; 
+        let physicsAccumulator = 0;
+        const PHYSICS_STEP = 1.0; // 物理世界的标准时间步长，永远不变
+        
+        // 性能监控
+        let lastTime = 0;
+        let frames = 0;
+        const fpsElem = document.getElementById('fps-counter');
+        const countElem = document.getElementById('total-particles');
+
+        function resize() {
+            width = canvas.width = canvas.parentElement.clientWidth;
+            height = canvas.height = canvas.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 粒子工厂：增加 prevX/prevY 用于插值
+        const createParticle = (x, y, c) => {
+            return { 
+                x: x, y: y, 
+                vx: 0, vy: 0, 
+                color: c,
+                // 插值专用：记录上一帧物理状态
+                prevX: x, prevY: y 
+            };
+        };
+
+        function initParticles() {
+            particles = [];
+            for (let c = 0; c < 4; c++) {
+                for (let i = 0; i < atomCounts[c]; i++) {
+                    particles.push(createParticle(
+                        Math.random() * width,
+                        Math.random() * height,
+                        c
+                    ));
+                }
+            }
+            updateTotalCount();
+        }
+
+        function updateTotalCount() {
+            countElem.innerText = particles.length;
+        }
+
+        // 物理更新：这是模拟的“真理”，无论时间快慢，这个函数的逻辑和步长都不变
+        function updatePhysics() {
+            for (let i = 0; i < particles.length; i++) {
+                let a = particles[i];
+                
+                // 重要：在更新位置前，记录当前位置为“旧位置”，供渲染插值使用
+                a.prevX = a.x;
+                a.prevY = a.y;
+                
+                let fx = 0;
+                let fy = 0;
+
+                for (let j = 0; j < particles.length; j++) {
+                    if (i === j) continue;
+                    let b = particles[j];
+
+                    let dx = a.x - b.x;
+                    let dy = a.y - b.y;
+                    
+                    // 环形世界最短距离逻辑 (可选，这里为了严格复刻视频保持非环形，但处理边界反弹)
+                    // 如果需要环形，dx 应为：if(dx > width/2) dx -= width;
+                    
+                    let d2 = dx * dx + dy * dy;
+
+                    if (d2 > 0 && d2 < cutOff * cutOff) {
+                        let d = Math.sqrt(d2);
+                        let g = ruleMatrix[a.color][b.color];
+                        if (d < 1) d = 1; // 防止除零
+                        let F = g * 1 / d;
+                        fx += (F * dx);
+                        fy += (F * dy);
+                    }
+                }
+
+                // 核心动力学
+                a.vx = (a.vx + fx) * 0.5;
+                a.vy = (a.vy + fy) * 0.5;
+
+                a.x += a.vx;
+                a.y += a.vy;
+
+                // 边界反弹
+                if (a.x <= 0) { a.x = 0; a.vx *= -1; }
+                if (a.x >= width) { a.x = width; a.vx *= -1; }
+                if (a.y <= 0) { a.y = 0; a.vy *= -1; }
+                if (a.y >= height) { a.y = height; a.vy *= -1; }
+            }
+        }
+
+        // 绘制：使用插值 (alpha 0~1)
+        function draw(alpha) {
+            // 清除背景 (使用稍微透明的黑色产生拖尾效果? 不，清晰版用纯黑)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, width, height);
+
+            for (let i = 0; i < particles.length; i++) {
+                let p = particles[i];
+                ctx.fillStyle = colors[p.color];
+                
+                // 线性插值计算渲染位置
+                // renderX = oldX + (newX - oldX) * alpha
+                // 这确保了即使物理更新每秒只有10次，渲染依然是60fps平滑的
+                let renderX = p.prevX + (p.x - p.prevX) * alpha;
+                let renderY = p.prevY + (p.y - p.prevY) * alpha;
+                
+                // 绘制小方块
+                ctx.fillRect(renderX, renderY, 3, 3); 
+            }
+        }
+
+        // 主循环 (Game Loop)
+        function loop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            let frameTime = timestamp - lastTime;
+            lastTime = timestamp;
+            
+            // 防止浏览器后台挂起导致的一帧时间过长
+            if (frameTime > 250) frameTime = 250;
+
+            if (!isPaused) {
+                // 将毫秒转为标准帧单位 (假设60fps为基准，16.6ms = 1.0 unit)
+                // 这里我们简化：累加器直接加 timeScale
+                // 但为了让 timeScale=1.0 对应 60FPS 下的 1 次更新，我们需要归一化
+                
+                // 逻辑：每一帧我们应该推进的时间量 = timeScale
+                // 物理引擎每走一步消耗 1.0 的时间量
+                
+                // 如果 timeScale = 0.1，我们需要 10 帧才能凑够 1.0 的物理步长 -> 慢放
+                // 如果 timeScale = 2.0，我们一帧就凑够 2.0 -> 循环跑 2 次物理 -> 快进
+                
+                physicsAccumulator += timeScale;
+
+                // 螺旋死锁保护 (防止 accumulator 无限大导致卡死)
+                let maxSteps = 10; 
+                while (physicsAccumulator >= PHYSICS_STEP && maxSteps > 0) {
+                    updatePhysics();
+                    physicsAccumulator -= PHYSICS_STEP;
+                    maxSteps--;
+                }
+            }
+
+            // 计算插值系数 alpha
+            // alpha = 剩余的累加时间 / 物理步长
+            // 例如：accumulator 剩 0.5，步长 1.0，说明我们在两帧中间 50% 的位置
+            let alpha = physicsAccumulator / PHYSICS_STEP;
+            // 如果暂停，直接画当前位置，不插值（或者 alpha=1）
+            if(isPaused) alpha = 1.0;
+
+            draw(alpha);
+
+            // FPS 计算
+            frames++;
+            if (frames % 20 === 0) { // 减少 DOM 操作频率
+                fpsElem.innerText = Math.round(1000 / frameTime);
+            }
+
+            requestAnimationFrame(loop);
+        }
+
+        // --- UI 控制逻辑 ---
+
+        const matrixContainer = document.getElementById('rules-matrix');
+        
+        function initUI() {
+            matrixContainer.innerHTML = '';
+            const labels = ['红', '绿', '蓝', '黄'];
+            const textColors = ['text-red-500', 'text-green-500', 'text-blue-500', 'text-yellow-500'];
+
+            for (let i = 0; i < 4; i++) {
+                const label = document.createElement('div');
+                label.className = `font-bold text-right pr-2 ${textColors[i]}`;
+                label.innerText = labels[i];
+                matrixContainer.appendChild(label);
+
+                for (let j = 0; j < 4; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'matrix-cell flex justify-center';
+                    
+                    const input = document.createElement('input');
+                    input.type = 'number';
+                    input.value = 0;
+                    input.className = 'w-full h-7 bg-[#111] text-white text-center text-[10px] border border-gray-700 rounded focus:border-green-500 outline-none transition-colors';
+                    
+                    input.addEventListener('change', (e) => {
+                        updateRule(i, j, parseFloat(e.target.value));
+                    });
+
+                    // 保存引用以便更新
+                    input.id = `rule-${i}-${j}`;
+                    cell.appendChild(input);
+                    matrixContainer.appendChild(cell);
+                }
+            }
+        }
+
+        function initRules() {
+            ruleMatrix = [];
+            for(let i=0; i<4; i++) ruleMatrix[i] = new Array(4).fill(0);
+        }
+
+        function updateRule(r, c, val) {
+            ruleMatrix[r][c] = val / 10; 
+        }
+
+        function updateUIInputs() {
+            for(let i=0; i<4; i++){
+                for(let j=0; j<4; j++){
+                    let val = Math.round(ruleMatrix[i][j] * 10);
+                    const input = document.getElementById(`rule-${i}-${j}`);
+                    if(input) input.value = val;
+                }
+            }
+        }
+
+        function randomizeRules() {
+            for(let i=0; i<4; i++){
+                for(let j=0; j<4; j++){
+                    let val = (Math.random() * 2 - 1);
+                    ruleMatrix[i][j] = val;
+                }
+            }
+            updateUIInputs();
+            initParticles();
+        }
+
+        function bindSliders() {
+            // 粒子数量
+            ['red', 'green', 'blue', 'yellow'].forEach((color, idx) => {
+                const slider = document.getElementById(`count-${color}`);
+                const display = document.getElementById(`val-${color}`);
+                slider.addEventListener('input', (e) => {
+                    const val = parseInt(e.target.value);
+                    display.innerText = val;
+                    atomCounts[idx] = val;
+                    initParticles();
+                });
+            });
+
+            // 范围
+            const rangeSlider = document.getElementById('param-range');
+            const rangeDisplay = document.getElementById('val-range');
+            rangeSlider.addEventListener('input', (e) => {
+                cutOff = parseInt(e.target.value);
+                rangeDisplay.innerText = cutOff;
+            });
+
+            // 时间速率 (映射逻辑：1-10 -> 0.1-1.0, 10-50 -> 1.0-5.0)
+            const timeSlider = document.getElementById('param-time');
+            const timeDisplay = document.getElementById('val-time');
+            
+            const updateTimeScale = () => {
+                let val = parseInt(timeSlider.value);
+                // 简单的分段映射，让滑块中间(10)对应1.0x
+                if (val <= 10) {
+                    timeScale = val / 10; // 0.1 ~ 1.0
+                } else {
+                    timeScale = 1.0 + (val - 10) * 0.1; // 1.1 ~ 5.0
+                }
+                timeDisplay.innerText = timeScale.toFixed(1) + "x";
+            };
+            
+            timeSlider.addEventListener('input', updateTimeScale);
+            updateTimeScale(); // 初始化
+        }
+
+        document.getElementById('btn-randomize').addEventListener('click', randomizeRules);
+        document.getElementById('btn-reset').addEventListener('click', () => initParticles());
+        document.getElementById('btn-pause').addEventListener('click', () => { isPaused = !isPaused; });
+
+        // 鼠标排斥
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            particles.forEach(p => {
+                const dx = p.x - mouseX;
+                const dy = p.y - mouseY;
+                const d = Math.sqrt(dx*dx + dy*dy);
+                if (d < 300) {
+                    const force = 200 / (d + 1);
+                    p.vx += force * dx / d;
+                    p.vy += force * dy / d;
+                }
+            });
+        });
+
+        // 启动
+        initUI();
+        initRules();
+        bindSliders();
+        randomizeRules();
+        requestAnimationFrame(loop);
+        
+    </script>
+</body>
+</html>
